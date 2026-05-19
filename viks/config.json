@@ -1,0 +1,7 @@
+{
+  "port": "45000",
+  "max_connections": 100,
+  "xx log_file": "server.log",
+  "keep_alive_period": 10,
+  "keep_alive_timeout": 10
+}
