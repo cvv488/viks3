@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -10,6 +11,7 @@ import (
 )
 
 func main() {
+	fmt.Println("===== START Viking Server =====")
 	// Загружаем конфигурацию и учётные данные
 	server, err := NewConnectionServer("config.json", "auth.json")
 	if err != nil {
@@ -46,7 +48,7 @@ func (s *ConnectionServer) Start() {
 			s.logger.Println("Ошибка при принятии соединения:", err)
 			continue
 		}
-		s.logger.Printf("Новое подключение: %s", conn.RemoteAddr().String())
+		// s.logger.Printf("Новое подключение: %s", conn.RemoteAddr().String())
 
 		// Проверяем лимит подключений
 		s.mutex.Lock()
@@ -81,28 +83,30 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 
 	//ждем аутентификацию
-	msg, err := s.readMsg(reader)
+	msg, err := readMsg(reader)
 	if err != nil {
+		s.logger.Printf("%v", err)
 		return
 	}
-	authenticated := false
-	if passw, ok := msg.Data.(string); ok {
-		// Проверяем учётные данные
-		for _, cred := range s.credentials {
-			if cred.Username == msg.ClientID && cred.Password == passw {
-				authenticated = true
-				break
-			}
-		}
-	} else {
-		s.logger.Printf("bad data passw")
-		return
-	}
-	if !authenticated {
-		conn.Close()
-		s.logger.Printf("Отклонено подключение от %s: неверные учётные данные", conn.RemoteAddr().String())
-		return
-	}
+
+	// authenticated := false
+	// if passw, ok := msg.Data.(string); ok {
+	// 	// Проверяем учётные данные
+	// 	for _, cred := range s.credentials {
+	// 		if cred.Username == msg.ClientID && cred.Password == passw {
+	// 			authenticated = true
+	// 			break
+	// 		}
+	// 	}
+	// } else {
+	// 	s.logger.Printf("bad data passw")
+	// 	return
+	// }
+	// if !authenticated {
+	// 	conn.Close()
+	// 	s.logger.Printf("Отклонено подключение от %s: неверные учётные данные", conn.RemoteAddr().String())
+	// 	return
+	// }
 	// Успешная аутентификация - ответить
 	msg = Message{Type: "auth_ok", ClientID: msg.ClientID}
 	err = sendMsg(&msg, writer)
@@ -110,6 +114,8 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		s.logger.Println(err)
 		return
 	}
+	
+	logger := NewLogger(s.config.LogFile, msg.ClientID) //у каждого клиента
 
 	client := &Client{
 		Conn:     conn,
@@ -117,6 +123,7 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		Reader:   reader,
 		Idc:      msg.ClientID,
 		LastPing: time.Now(),
+		logger:   logger,
 	}
 	s.register <- client
 	// s.logger.Printf("Клиент %s успешно аутентифицирован", msg.ClientID)
@@ -129,13 +136,14 @@ func (s *ConnectionServer) handleClient(client *Client) {
 		s.unregister <- client
 	}()
 	for {
-		msg, err := s.readMsg(client.Reader)
+		msg, err := readMsg(client.Reader)
 		if err != nil {
+			client.logger.Println(err)
 			return
 		}
 		switch msg.Type {
 		case "ping":
-			log.Println("-> ping")
+			client.logger.Println("-> ping")
 			client.Mutex.Lock()
 			client.LastPing = time.Now()
 			client.Mutex.Unlock()
@@ -143,16 +151,16 @@ func (s *ConnectionServer) handleClient(client *Client) {
 			msg.Type = "pong"
 			err = sendMsg(&msg, client.Writer)
 			if err != nil {
-				s.logger.Println(err)
+				client.logger.Println(err)
 				return
 			}
 
 		case "info":
-			log.Println("=> info")
-			s.broadcast <- msg //[]byte(formattedMsg)
+			client.logger.Println("-> info")
+			s.broadcast <- msg
 
 		default:
-			log.Printf("Получен: %s", msg.Type)
+			client.logger.Println("Получен:", msg.Type)
 		}
 	}
 }
@@ -165,7 +173,8 @@ func (s *ConnectionServer) handleEvents() {
 			s.mutex.Lock()
 			s.clients[client] = true
 			s.mutex.Unlock()
-			s.logger.Printf("Клиент %s зарегистрирован. Всего подключений: %d", client.Idc, len(s.clients))
+			client.logger.Printf("Registered, links: %d", len(s.clients))
+			// client.logger.Printf("Клиент %s зарегистрирован. Всего подключений: %d", client.Idc, len(s.clients))
 
 		case client := <-s.unregister:
 			s.mutex.Lock()
@@ -174,7 +183,8 @@ func (s *ConnectionServer) handleEvents() {
 				client.Conn.Close()
 			}
 			s.mutex.Unlock()
-			s.logger.Printf("Клиент %s отсоединён. Осталось подключений: %d", client.Idc, len(s.clients))
+			client.logger.Printf("Unregistered, links: %d", len(s.clients))
+			// client.logger.Printf("Клиент %s отсоединён. Осталось подключений: %d", client.Idc, len(s.clients))
 
 		case message := <-s.broadcast:
 			find := false
@@ -185,6 +195,7 @@ func (s *ConnectionServer) handleEvents() {
 					if err != nil {
 						// Если ошибка записи, помечаем клиента к удалению
 						s.unregister <- client
+						client.logger.Println(err)
 					}
 					find = true
 					break

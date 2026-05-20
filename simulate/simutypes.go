@@ -7,7 +7,7 @@ import (
 	"log"
 	"net"
 	"time"
-	// co "viks3/co"
+	// co "viks"
 )
 
 // Config — структура конфигурации
@@ -22,21 +22,14 @@ type ClientConfig struct {
 	Mode  string
 }
 
-// Message — структура сообщения
-type Message struct {
-	Type      string `json:"type"`
-	ClientID  string `json:"client_id"`
-	Dest      string
-	Data      any       `json:"data,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
 // TCPClient — структура TCP-клиента
 type TCPClient struct {
 	config          *Config
 	id, passw, mode string
-	conn            net.Conn
 	closed          bool
+	conn            net.Conn
+	Writer          *bufio.Writer
+	Reader          *bufio.Reader
 }
 
 // NewTCPClient создает новый TCP-клиент
@@ -48,6 +41,13 @@ func NewTCPClient(cli ClientConfig, conf *Config) *TCPClient {
 		mode:   cli.Mode,
 		closed: false,
 	}
+}
+func (c *TCPClient) say(m string) {
+	log.Println(c.id, m)
+}
+func (c *TCPClient) sayError(m string, e error) error {
+	log.Println(c.id, "ERROR:", m, e.Error())
+	return e
 }
 
 func LoadConfig(fpath string) (*Config, error) {
@@ -93,33 +93,33 @@ func (c *TCPClient) connectWithRetries(maxRetries int, timeout time.Duration) (n
 // 	return buffer[:n], nil
 // }
 
-func (c *TCPClient) readMsg() (Message, error) {
-	reader := bufio.NewReader(c.conn)
-	bb, err := reader.ReadString('\n') //marshal убирает \n из json
-	if err != nil {
-		return Message{}, fmt.Errorf("readMsg: %v", err)
-	}
-	var msg Message
-	if err := json.Unmarshal([]byte(bb), &msg); err == nil {
-		return msg, nil
-	}
-	return Message{}, fmt.Errorf("readMsg: %v", err)
-}
+// func (c *TCPClient) readMsg() (Message, error) {
+// 	reader := bufio.NewReader(c.conn)
+// 	bb, err := reader.ReadString('\n') //marshal убирает \n из json
+// 	if err != nil {
+// 		return Message{}, fmt.Errorf("readMsg: %v", err)
+// 	}
+// 	var msg Message
+// 	if err := json.Unmarshal([]byte(bb), &msg); err == nil {
+// 		return msg, nil
+// 	}
+// 	return Message{}, fmt.Errorf("readMsg: %v", err)
+// }
 
 // sendClientID отправляет идентификатор клиента на сервер
-func (c *TCPClient) sendMsg(msg *Message) error {
-	pref := "sendMsg:"
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("%v ошибка сериализации: %v", pref, err)
-	}
-	_, err = c.conn.Write(append(data, '\n'))
-	if err != nil {
-		return fmt.Errorf("%v ошибка отправки: %v", pref, err)
-	}
-	// c.say(pref + " Отправлен")
-	return nil
-}
+// func (c *TCPClient) sendMsg(msg *Message) error {
+// 	pref := "sendMsg:"
+// 	data, err := json.Marshal(msg)
+// 	if err != nil {
+// 		return fmt.Errorf("%v ошибка сериализации: %v", pref, err)
+// 	}
+// 	_, err = c.conn.Write(append(data, '\n'))
+// 	if err != nil {
+// 		return fmt.Errorf("%v ошибка отправки: %v", pref, err)
+// 	}
+// 	// c.say(pref + " Отправлен")
+// 	return nil
+// }
 
 // waitForConnectionAck ждет подтверждение подключения от сервера
 // func (c *TCPClient) waitForConnectionAck() error {
@@ -141,5 +141,5 @@ func (c *TCPClient) Close() {
 		c.conn.Close()
 	}
 	c.closed = true
-	log.Println("Соединение закрыто")
+	c.say("Close")
 }

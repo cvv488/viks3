@@ -2,10 +2,8 @@ package main
 
 import (
 	"bufio"
-	"io"
 	"log"
 	"net"
-	"os"
 	"sync"
 	"time"
 )
@@ -15,8 +13,8 @@ type ServerConfig struct {
 	Port             string `json:"port"`
 	MaxConnections   int    `json:"max_connections"`
 	LogFile          string `json:"log_file"`
-	KeepAlivePeriod  int    `json:"keep_alive_period"`  // период в секундах
-	KeepAliveTimeout int    `json:"keep_alive_timeout"` // таймаут в секундах
+	KeepAlivePeriod  int    `json:"keep_alive_period"`
+	KeepAliveTimeout int    `json:"keep_alive_timeout"`
 }
 
 // Структура учётных данных
@@ -47,21 +45,12 @@ type Client struct {
 	Reader   *bufio.Reader
 	LastPing time.Time // время последнего успешного пинга
 	Mutex    sync.Mutex
-}
-
-// shared
-// Message — структура сообщения
-type Message struct {
-	Type      string `json:"type"`
-	ClientID  string `json:"client_id"`
-	Dest      string
-	Data      interface{} `json:"data,omitempty"`
-	Timestamp time.Time   `json:"timestamp"`
+	logger   *log.Logger
 }
 
 // Создаёт новый сервер соединений с загрузкой конфигурации
 func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error) {
-	config, err := loadConfig(configFile)
+	config, err := LoadConfig(configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -71,20 +60,7 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 		return nil, err
 	}
 
-	// Настройка логирования
-	var logOutput io.Writer
-	if config.LogFile != "" {
-		logFile, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			log.Printf("Не удалось открыть файл логов: %v, используем stdout", err)
-			logOutput = os.Stdout
-		} else {
-			logOutput = logFile
-		}
-	} else {
-		logOutput = os.Stdout
-	}
-	logger := log.New(logOutput, "SERVER: ", log.Ldate|log.Ltime|log.Lshortfile)
+	logger := NewLogger(config.LogFile, "SRVR")
 
 	return &ConnectionServer{
 		clients:         make(map[*Client]bool),

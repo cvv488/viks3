@@ -1,16 +1,16 @@
 {
     "rem": "simu clients v1",
     "server": "localhost:45000",
-    "ping_interval": 30,
+    "ping_interval": 60,
     "clients": [
         {
             "id": "0001",
-            "passw": "111",
+            "passw": "0001p",
             "mode": "1"
         },
         {
             "id": "0002",
-            "passw": "222"
+            "passw": "0002p"
         }
     ]
 }

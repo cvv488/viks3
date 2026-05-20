@@ -1,21 +1,17 @@
 package main
 
 import (
-	"encoding/json"
+	"bufio"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-
 	"time"
-	// co "../common"
-	// "gopkg.in/yaml.v3"
 )
 
 func main() {
-	fmt.Println("Start Simulate Viking")
+	fmt.Println("----- START Simulate Viking -----")
 	// Загружаем конфигурацию
 	config, err := LoadConfig("simuconfig.json")
 	if err != nil {
@@ -25,7 +21,18 @@ func main() {
 
 	// new clients
 	tcc := []TCPClient{}
-	for _, cli := range config.Clients {
+	//клиенты из файла
+	// for _, cli := range config.Clients {
+	// client := NewTCPClient(cli, config)
+	// 	tcc = append(tcc, *client)
+	// }
+	//клиенты new
+	for i := 1; i <= 2; i++ {
+		sid := fmt.Sprintf("%04d", i)
+		cli := ClientConfig{Id: sid, Passw: sid + "p"}
+		if i == 1 {
+			cli.Mode = "1"
+		}
 		client := NewTCPClient(cli, config)
 		tcc = append(tcc, *client)
 	}
@@ -49,13 +56,6 @@ func main() {
 
 	select {} // Бесконечное ожидание
 }
-func (c *TCPClient) say(m string) {
-	log.Println(c.id, m)
-}
-func (c *TCPClient) sayError(m string, e error) error {
-	log.Println(c.id, "ERROR:", m, e.Error())
-	return e
-}
 
 // Start запускает клиента
 func (c *TCPClient) Start() error {
@@ -64,17 +64,19 @@ func (c *TCPClient) Start() error {
 		return err
 	}
 	c.conn = conn
-	c.say("Успешно подключились к серверу")
+	writer := bufio.NewWriter(conn)
+	c.Writer = writer
+	reader := bufio.NewReader(conn)
+	c.Reader = reader
+	c.say("Connected")
 
 	//отправка аутентификации - ожидание подтверждения
 	msg := Message{Type: "auth", ClientID: c.id, Data: c.passw}
-	err = c.sendMsg(&msg)
-	if err != nil {
-		return c.sayError("", err)
+	if err = sendMsg(&msg, writer); err != nil {
+		return c.sayError("start", err)
 	}
-	msg, err = c.readMsg()
-	if err != nil {
-		return c.sayError("", err)
+	if msg, err = readMsg(reader); err != nil {
+		return c.sayError("start", err)
 	}
 	if msg.Type != "auth_ok" {
 		return c.sayError("auth", err)
@@ -88,18 +90,18 @@ func (c *TCPClient) Start() error {
 	c.startReceiving()
 
 	c.Close()
-	c.say("Closed")
+	c.say("exit")
 	return nil
 }
 
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
 func (c *TCPClient) startHeartbeat() {
 	tickerPing := time.NewTicker(time.Duration(c.config.PingInterval) * time.Second)
-	ticker2 := time.NewTicker(5 * time.Second) // каждые 30 секунд
+	tickerInfo := time.NewTicker(500 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
 	defer func() {
 		tickerPing.Stop()
-		ticker2.Stop()
+		tickerInfo.Stop()
 		// ticker3.Stop()
 	}()
 	for {
@@ -109,21 +111,22 @@ func (c *TCPClient) startHeartbeat() {
 				return
 			}
 			msg := Message{Type: "ping"} // Data: map[string]interface{}{"uptime": time.Since(time.Now()).String(), Timestamp: time.Now(),}
-			err := c.sendMsg(&msg)
-			if err != nil {
+			if err := sendMsg(&msg, c.Writer); err != nil {
+				c.sayError("shb1", err)
 				return
 			}
 			c.say("<- ping")
 
-		case <-ticker2.C:
+		case <-tickerInfo.C:
 			if c.mode == "1" {
 				msg := Message{Type: "info", ClientID: c.id, Dest: "0002"}
-				err := c.sendMsg(&msg)
-				if err != nil {
+				if err := sendMsg(&msg, c.Writer); err != nil {
+					c.sayError("shb2", err)
 					return
 				}
-				c.say("<= info")
+				c.say("<- info to " + msg.Dest)
 			}
+
 			// case <-ticker3.C:
 		}
 	}
@@ -131,31 +134,45 @@ func (c *TCPClient) startHeartbeat() {
 
 // startReceiving запускает прием данных от сервера
 func (c *TCPClient) startReceiving() {
-	buffer := make([]byte, 4096)
 	for {
-		n, err := c.conn.Read(buffer)
+		msg, err := readMsg(c.Reader)
 		if err != nil {
-			if err == io.EOF {
-				c.say("Соединение закрыто сервером")
-			} else {
-				c.sayError("Ошибка чтения данных", err)
-			}
-			c.Close()
+			c.sayError("rx", err)
 			return
 		}
-		// Обрабатываем полученное сообщение
-		message := string(buffer[:n])
-		var msg Message
-		if err := json.Unmarshal([]byte(message), &msg); err == nil {
-			switch msg.Type {
-			case "pong":
-				c.say("-> pong")
-			// case "command":
-			// 	log.Printf("Получена команда: %v", msg.Data)
-			// Здесь можно добавить обработку команд от сервера
-			default:
-				c.say("=> " + msg.Type)
-			}
+		switch msg.Type {
+		case "pong":
+			c.say("-> pong")
+		default:
+			c.say("=> " + msg.Type)
 		}
 	}
+
+	// buffer := make([]byte, 4096)
+	// for {
+	// 	n, err := c.conn.Read(buffer)
+	// 	if err != nil {
+	// 		if err == io.EOF {
+	// 			c.say("Соединение закрыто сервером")
+	// 		} else {
+	// 			c.sayError("Ошибка чтения данных", err)
+	// 		}
+	// 		c.Close()
+	// 		return
+	// 	}
+	// 	// Обрабатываем полученное сообщение
+	// 	message := string(buffer[:n])
+	// 	var msg Message
+	// 	if err := json.Unmarshal([]byte(message), &msg); err == nil {
+	// 		switch msg.Type {
+	// 		case "pong":
+	// 			c.say("-> pong")
+	// 		// case "command":
+	// 		// 	log.Printf("Получена команда: %v", msg.Data)
+	// 		// Здесь можно добавить обработку команд от сервера
+	// 		default:
+	// 			c.say("=> " + msg.Type)
+	// 		}
+	// 	}
+	// }
 }

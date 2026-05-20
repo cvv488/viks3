@@ -9,25 +9,17 @@ import (
 )
 
 // Загружает конфигурацию из файла
-func loadConfig(filename string) (*ServerConfig, error) {
-	file, err := os.Open(filename)
+func LoadConfig(fpath string) (*ServerConfig, error) {
+	bb, err := ReadFileToBytesJson(fpath)
 	if err != nil {
-		return nil, fmt.Errorf("не удалось открыть файл конфигурации: %v", err)
+		return nil, err
 	}
-	defer file.Close()
-
 	var config ServerConfig
-	// Устанавливаем значения по умолчанию
-	config.KeepAlivePeriod = 30  // 30 секунд
-	config.KeepAliveTimeout = 60 // 60 секунд
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
+	err = json.Unmarshal(bb, &config)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка парсинга конфигурации: %v", err)
+		return nil, err
 	}
-
-	return &config, nil
+	return &config, err
 }
 
 // Загружает учётные данные из файла
@@ -71,38 +63,38 @@ func clearBufferSafe(reader *bufio.Reader, maxBytes int) error {
 	return fmt.Errorf("превышен лимит очистки: прочитано %d байт", discarded)
 }
 
-func (s *ConnectionServer) readMsg(reader *bufio.Reader) (Message, error) {
-	bb, err := reader.ReadString('\n') //marshal убирает \n из json
-	if err != nil {
-		s.logger.Printf("reader")
-		return Message{}, err
-	}
-	var msg Message
-	err = json.Unmarshal([]byte(bb), &msg)
-	if err != nil {
-		s.logger.Printf("ошибка десериализации JSON: %v", err)
-		return Message{}, err
-	}
-	// fmt.Println(msg)
-	return msg, nil
-}
+// func (s *ConnectionServer) readMsg(reader *bufio.Reader) (Message, error) {
+// 	bb, err := reader.ReadString('\n') //marshal убирает \n из json
+// 	if err != nil {
+// 		s.logger.Printf("reader")
+// 		return Message{}, err
+// 	}
+// 	var msg Message
+// 	err = json.Unmarshal([]byte(bb), &msg)
+// 	if err != nil {
+// 		s.logger.Printf("ошибка десериализации JSON: %v", err)
+// 		return Message{}, err
+// 	}
+// 	// fmt.Println(msg)
+// 	return msg, nil
+// }
 
-func sendMsg(msg *Message, writer *bufio.Writer) error {
-	pref := msg.ClientID + " sendMsg:"
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("%v ошибка сериализации: %v", pref, err)
-	}
-	_, err = writer.Write(append(data, '\n'))
-	if err != nil {
-		return fmt.Errorf("%v ошибка отправки: %v", pref, err)
-	}
-	if err = writer.Flush(); err != nil {
-		return fmt.Errorf("%v ошибка записи: %v", pref, err)
-	}
-	// log.Printf("%v Отправлен", pref)
-	return nil
-}
+// func sendMsg(msg *Message, writer *bufio.Writer) error {
+// 	pref := msg.ClientID + " sendMsg:"
+// 	data, err := json.Marshal(msg)
+// 	if err != nil {
+// 		return fmt.Errorf("%v ошибка сериализации: %v", pref, err)
+// 	}
+// 	_, err = writer.Write(append(data, '\n'))
+// 	if err != nil {
+// 		return fmt.Errorf("%v ошибка отправки: %v", pref, err)
+// 	}
+// 	if err = writer.Flush(); err != nil {
+// 		return fmt.Errorf("%v ошибка записи: %v", pref, err)
+// 	}
+// 	// log.Printf("%v Отправлен", pref)
+// 	return nil
+// }
 
 // func (s *ConnectionServer) sendMsg(msg *Message, writer *bufio.Writer) error {
 // 	pref := "sendMsg:"
