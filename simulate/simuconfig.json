@@ -1,7 +1,7 @@
 {
     "rem": "simu clients v1",
     "server": "localhost:45000",
-    "ping_interval": 60,
+    "ping_interval": 600,
     "clients": [
         {
             "id": "0001",

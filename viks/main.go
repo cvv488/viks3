@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"time"
 )
+var timeter time.Time
 
 func main() {
 	fmt.Println("===== START Viking Server =====")
@@ -54,8 +55,8 @@ func (s *ConnectionServer) Start() {
 		s.mutex.Lock()
 		if s.connectionCount >= s.config.MaxConnections {
 			s.mutex.Unlock()
-			conn.Write([]byte("Сервер перегружен. Попробуйте позже.\n"))
 			conn.Close()
+			s.logger.Println("Сервер перегружен. Попробуйте позже")
 			continue
 		}
 		s.connectionCount++
@@ -156,7 +157,8 @@ func (s *ConnectionServer) handleClient(client *Client) {
 			}
 
 		case "info":
-			client.logger.Println("-> info")
+			// client.logger.Println("-> info")
+			timeter = time.Now()
 			s.broadcast <- msg
 
 		default:
@@ -191,6 +193,7 @@ func (s *ConnectionServer) handleEvents() {
 			s.mutex.RLock()
 			for client := range s.clients { //todo map[]
 				if message.Dest == client.Idc {
+					fmt.Println(time.Since(timeter).Microseconds())
 					err := sendMsg(&message, client.Writer)
 					if err != nil {
 						// Если ошибка записи, помечаем клиента к удалению

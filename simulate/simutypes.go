@@ -26,7 +26,7 @@ type ClientConfig struct {
 type TCPClient struct {
 	config          *Config
 	id, passw, mode string
-	closed          bool
+	state           int //1-connected, 2-authorized, 9-closed
 	conn            net.Conn
 	Writer          *bufio.Writer
 	Reader          *bufio.Reader
@@ -39,7 +39,6 @@ func NewTCPClient(cli ClientConfig, conf *Config) *TCPClient {
 		id:     cli.Id,
 		passw:  cli.Passw,
 		mode:   cli.Mode,
-		closed: false,
 	}
 }
 func (c *TCPClient) say(m string) {
@@ -69,10 +68,10 @@ func (c *TCPClient) connectWithRetries(maxRetries int, timeout time.Duration) (n
 	}
 	address := c.config.ServerAddress
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		c.say(fmt.Sprintf("Попытка %d подключения к %s...", attempt, address))
+		// c.say(fmt.Sprintf("Попытка %d подключения к %s...", attempt, address))
 		conn, err := dialer.Dial("tcp", address)
 		if err == nil {
-			c.say(fmt.Sprintf("Успешно подключились к %s с %d попытки", address, attempt))
+			// c.say(fmt.Sprintf("Успешно подключились к %s с %d попытки", address, attempt))
 			return conn, nil // Возвращаем успешное соединение
 		}
 		c.say(fmt.Sprintf("Попытка %d неудачна: %v", attempt, err))
@@ -140,6 +139,6 @@ func (c *TCPClient) Close() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	c.closed = true
+	c.state = 9
 	c.say("Close")
 }

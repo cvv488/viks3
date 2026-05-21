@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+const CLIENTS = 1000
+
+var connects int
+
 func main() {
 	fmt.Println("----- START Simulate Viking -----")
 	// Загружаем конфигурацию
@@ -27,7 +31,7 @@ func main() {
 	// 	tcc = append(tcc, *client)
 	// }
 	//клиенты new
-	for i := 1; i <= 2; i++ {
+	for i := 1; i <= CLIENTS; i++ {
 		sid := fmt.Sprintf("%04d", i)
 		cli := ClientConfig{Id: sid, Passw: sid + "p"}
 		if i == 1 {
@@ -52,6 +56,7 @@ func main() {
 	//run clients
 	for _, cli := range tcc {
 		go cli.Start()
+		time.Sleep(time.Millisecond * 10)
 	}
 
 	select {} // Бесконечное ожидание
@@ -68,6 +73,7 @@ func (c *TCPClient) Start() error {
 	c.Writer = writer
 	reader := bufio.NewReader(conn)
 	c.Reader = reader
+	c.state = 1
 	c.say("Connected")
 
 	//отправка аутентификации - ожидание подтверждения
@@ -81,7 +87,9 @@ func (c *TCPClient) Start() error {
 	if msg.Type != "auth_ok" {
 		return c.sayError("auth", err)
 	}
-	c.say("Authorized ok")
+	c.state = 2
+	connects++
+	c.say("Authorized")
 
 	// Запускаем периодическую отправку данных
 	go c.startHeartbeat()
@@ -91,35 +99,42 @@ func (c *TCPClient) Start() error {
 
 	c.Close()
 	c.say("exit")
+	connects--
 	return nil
 }
 
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
 func (c *TCPClient) startHeartbeat() {
 	tickerPing := time.NewTicker(time.Duration(c.config.PingInterval) * time.Second)
-	tickerInfo := time.NewTicker(500 * time.Millisecond)
+	tickerInfo := time.NewTicker(100 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
 	defer func() {
 		tickerPing.Stop()
 		tickerInfo.Stop()
 		// ticker3.Stop()
 	}()
+	destCount := 2
 	for {
 		select {
 		case <-tickerPing.C:
-			if c.closed {
-				return
+			if c.state == 2 {
+				msg := Message{Type: "ping"} // Data: map[string]interface{}{"uptime": time.Since(time.Now()).String(), Timestamp: time.Now(),}
+				if err := sendMsg(&msg, c.Writer); err != nil {
+					c.sayError("shb1", err)
+					return
+				}
+				c.say("<- ping")
 			}
-			msg := Message{Type: "ping"} // Data: map[string]interface{}{"uptime": time.Since(time.Now()).String(), Timestamp: time.Now(),}
-			if err := sendMsg(&msg, c.Writer); err != nil {
-				c.sayError("shb1", err)
-				return
-			}
-			c.say("<- ping")
 
 		case <-tickerInfo.C:
-			if c.mode == "1" {
-				msg := Message{Type: "info", ClientID: c.id, Dest: "0002"}
+			//0001 передает сообщения на все другие
+			if c.mode == "1" && connects == CLIENTS { //и все подключены
+				msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount)}
+				destCount++
+				if destCount > CLIENTS {
+					destCount = 2
+				}
+
 				if err := sendMsg(&msg, c.Writer); err != nil {
 					c.sayError("shb2", err)
 					return
