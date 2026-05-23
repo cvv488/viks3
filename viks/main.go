@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"time"
 )
+
 var timeter time.Time
 
 func main() {
@@ -115,7 +116,7 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		s.logger.Println(err)
 		return
 	}
-	
+
 	logger := NewLogger(s.config.LogFile, msg.ClientID) //у каждого клиента
 
 	client := &Client{
@@ -158,7 +159,6 @@ func (s *ConnectionServer) handleClient(client *Client) {
 
 		case "info":
 			// client.logger.Println("-> info")
-			timeter = time.Now()
 			s.broadcast <- msg
 
 		default:
@@ -173,41 +173,53 @@ func (s *ConnectionServer) handleEvents() {
 		select {
 		case client := <-s.register:
 			s.mutex.Lock()
-			s.clients[client] = true
+			s.clients[client.Idc] = client
 			s.mutex.Unlock()
-			client.logger.Printf("Registered, links: %d", len(s.clients))
-			// client.logger.Printf("Клиент %s зарегистрирован. Всего подключений: %d", client.Idc, len(s.clients))
+			///client.logger.Printf("Registered, links: %d", len(s.clients))
 
 		case client := <-s.unregister:
 			s.mutex.Lock()
-			if _, ok := s.clients[client]; ok {
-				delete(s.clients, client)
+			if _, ok := s.clients[client.Idc]; ok {
+				delete(s.clients, client.Idc)
 				client.Conn.Close()
 			}
 			s.mutex.Unlock()
-			client.logger.Printf("Unregistered, links: %d", len(s.clients))
-			// client.logger.Printf("Клиент %s отсоединён. Осталось подключений: %d", client.Idc, len(s.clients))
+			///client.logger.Printf("Unregistered, links: %d", len(s.clients))
 
 		case message := <-s.broadcast:
-			find := false
+			// find := false
 			s.mutex.RLock()
-			for client := range s.clients { //todo map[]
-				if message.Dest == client.Idc {
-					fmt.Println(time.Since(timeter).Microseconds())
-					err := sendMsg(&message, client.Writer)
-					if err != nil {
-						// Если ошибка записи, помечаем клиента к удалению
-						s.unregister <- client
-						client.logger.Println(err)
-					}
-					find = true
-					break
+			timeter = time.Now()
+			// fmt.Println(message.Dest)
+			if cli, ok := s.clients[message.Dest]; ok == true {
+				fmt.Println(message.ClientID, "->", message.Dest, time.Since(timeter).Microseconds())
+				err := sendMsg(&message, cli.Writer)
+				if err != nil {
+					// Если ошибка записи, помечаем клиента к удалению
+					s.unregister <- cli
+					cli.logger.Println(err)
 				}
-			}
-			s.mutex.RUnlock()
-			if !find {
+			} else {
 				s.logger.Printf("Bad Dest %s", message.Dest)
 			}
+
+			// for client := range s.clients { //todo map[]
+			// 	if message.Dest == client.Idc {
+			// 		fmt.Println(time.Since(timeter).Microseconds())
+			// 		err := sendMsg(&message, client.Writer)
+			// 		if err != nil {
+			// 			// Если ошибка записи, помечаем клиента к удалению
+			// 			s.unregister <- client
+			// 			client.logger.Println(err)
+			// 		}
+			// 		find = true
+			// 		break
+			// 	}
+			// }
+			s.mutex.RUnlock()
+			// if !find {
+			// 	s.logger.Printf("Bad Dest %s", message.Dest)
+			// }
 		}
 	}
 }
@@ -219,8 +231,8 @@ func (s *ConnectionServer) Stop() {
 	defer s.mutex.Unlock()
 
 	// Отключаем всех клиентов
-	for client := range s.clients {
-		client.Conn.Close()
+	for _, value := range s.clients {
+		value.Conn.Close()
 	}
-	s.clients = make(map[*Client]bool)
+	s.clients = make(map[string]*Client)
 }

@@ -4,13 +4,17 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
 
-const CLIENTS = 1000
+const (
+	RUNMODE = 2    //1-0001 посылает всем остальным, 2-все посылают всем рандомно
+	CLIENTS = 1000 // [0001...1000]
+)
 
 var connects int
 
@@ -31,6 +35,7 @@ func main() {
 	// 	tcc = append(tcc, *client)
 	// }
 	//клиенты new
+	// if RUNMODE == 1 {
 	for i := 1; i <= CLIENTS; i++ {
 		sid := fmt.Sprintf("%04d", i)
 		cli := ClientConfig{Id: sid, Passw: sid + "p"}
@@ -40,6 +45,7 @@ func main() {
 		client := NewTCPClient(cli, config)
 		tcc = append(tcc, *client)
 	}
+	// }
 
 	// Обработчик сигналов для корректного завершения
 	sigChan := make(chan os.Signal, 1)
@@ -106,7 +112,7 @@ func (c *TCPClient) Start() error {
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
 func (c *TCPClient) startHeartbeat() {
 	tickerPing := time.NewTicker(time.Duration(c.config.PingInterval) * time.Second)
-	tickerInfo := time.NewTicker(100 * time.Millisecond)
+	tickerInfo := time.NewTicker(1000 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
 	defer func() {
 		tickerPing.Stop()
@@ -127,19 +133,32 @@ func (c *TCPClient) startHeartbeat() {
 			}
 
 		case <-tickerInfo.C:
-			//0001 передает сообщения на все другие
-			if c.mode == "1" && connects == CLIENTS { //и все подключены
-				msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount)}
-				destCount++
-				if destCount > CLIENTS {
-					destCount = 2
+			if connects != CLIENTS { //еще не все подключены
+				continue
+			}
+			switch RUNMODE {
+			case 1: //0001 передает сообщения на все другие
+				if c.id == "0001" {
+					msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount)}
+					destCount++
+					if destCount > CLIENTS {
+						destCount = 2
+					}
+					if err := sendMsg(&msg, c.Writer); err != nil {
+						c.sayError("shb2", err)
+						return
+					}
+					c.say("<- info to " + msg.Dest)
 				}
-
+			case 2: //все всем рандомно
+				randomDest := rand.Intn(CLIENTS) + 1 //может и сам себе
+				msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", randomDest)}
 				if err := sendMsg(&msg, c.Writer); err != nil {
-					c.sayError("shb2", err)
+					c.sayError("shb3", err)
 					return
 				}
-				c.say("<- info to " + msg.Dest)
+				c.say("<- info to rand " + msg.Dest)
+
 			}
 
 			// case <-ticker3.C:

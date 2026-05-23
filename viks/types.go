@@ -25,10 +25,10 @@ type AuthCredentials struct {
 
 // Сервер соединений
 type ConnectionServer struct {
-	clients         map[*Client]bool
+	clients         map[string] *Client
 	register        chan *Client
 	unregister      chan *Client
-	broadcast       chan Message //[]byte
+	broadcast       chan Message
 	config          *ServerConfig
 	credentials     []AuthCredentials
 	connectionCount int
@@ -63,7 +63,7 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 	logger := NewLogger(config.LogFile, "SRVR")
 
 	return &ConnectionServer{
-		clients:         make(map[*Client]bool),
+		clients:         make(map[string]*Client),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		broadcast:       make(chan Message), //[]byte),
