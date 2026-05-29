@@ -12,11 +12,12 @@ import (
 )
 
 const (
-	RUNMODE = 2    //1-0001 посылает всем остальным, 2-все посылают всем рандомно
+	RUNMODE = 1    //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
 	CLIENTS = 1000 // [0001...1000]
 )
 
 var connects int
+var ioCount int
 
 func main() {
 	fmt.Println("----- START Simulate Viking -----")
@@ -112,8 +113,9 @@ func (c *TCPClient) Start() error {
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
 func (c *TCPClient) startHeartbeat() {
 	tickerPing := time.NewTicker(time.Duration(c.config.PingInterval) * time.Second)
-	tickerInfo := time.NewTicker(1000 * time.Millisecond)
+	tickerInfo := time.NewTicker(100 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
+	data := make([]byte, 10240)
 	defer func() {
 		tickerPing.Stop()
 		tickerInfo.Stop()
@@ -139,16 +141,21 @@ func (c *TCPClient) startHeartbeat() {
 			switch RUNMODE {
 			case 1: //0001 передает сообщения на все другие
 				if c.id == "0001" {
-					msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount)}
+					msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount), Data: data}
 					destCount++
 					if destCount > CLIENTS {
 						destCount = 2
 					}
+					timeter := time.Now()
 					if err := sendMsg(&msg, c.Writer); err != nil {
 						c.sayError("shb2", err)
 						return
 					}
-					c.say("<- info to " + msg.Dest)
+					fmt.Println()
+					s := fmt.Sprintf("<- info to %v c=%v tim=%v", msg.Dest, ioCount, time.Since(timeter).Milliseconds())
+					c.say(s) //"<- info to " + msg.Dest)
+					// c.say("<- info to " + msg.Dest)
+					ioCount++
 				}
 			case 2: //все всем рандомно
 				randomDest := rand.Intn(CLIENTS) + 1 //может и сам себе
@@ -158,6 +165,18 @@ func (c *TCPClient) startHeartbeat() {
 					return
 				}
 				c.say("<- info to rand " + msg.Dest)
+
+			case 3: //все посылают в один
+				if c.id != "0001" {
+					msg := Message{Type: "info", ClientID: c.id, Dest: "0001"}
+					if err := sendMsg(&msg, c.Writer); err != nil {
+						c.sayError("shb2", err)
+						return
+					}
+					s := fmt.Sprintf("<- info to %v c=%v", msg.Dest, ioCount)
+					c.say(s) //"<- info to " + msg.Dest)
+					ioCount++
+				}
 
 			}
 
@@ -169,17 +188,21 @@ func (c *TCPClient) startHeartbeat() {
 // startReceiving запускает прием данных от сервера
 func (c *TCPClient) startReceiving() {
 	for {
+		timeter := time.Now()
 		msg, err := readMsg(c.Reader)
+		fmt.Println("rx", time.Since(timeter).Milliseconds())
 		if err != nil {
 			c.sayError("rx", err)
 			return
 		}
+		ioCount--
 		switch msg.Type {
 		case "pong":
 			c.say("-> pong")
 		default:
 			c.say("=> " + msg.Type)
 		}
+		// time.Sleep(time.Second)
 	}
 
 	// buffer := make([]byte, 4096)

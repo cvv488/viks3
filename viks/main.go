@@ -11,6 +11,7 @@ import (
 )
 
 var timeter time.Time
+const SERVERID = "0000"
 
 func main() {
 	fmt.Println("===== START Viking Server =====")
@@ -109,9 +110,9 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	// 	s.logger.Printf("Отклонено подключение от %s: неверные учётные данные", conn.RemoteAddr().String())
 	// 	return
 	// }
-	// Успешная аутентификация - ответить
-	msg = Message{Type: "auth_ok", ClientID: msg.ClientID}
-	err = sendMsg(&msg, writer)
+	// Успешная аутентификация - ответить клиенту откуда пришло
+	msg2 := Message{Type: "auth_ok", ClientID: SERVERID, Dest: msg.ClientID}
+	err = sendMsg(&msg2, writer)
 	if err != nil {
 		s.logger.Println(err)
 		return
@@ -158,7 +159,10 @@ func (s *ConnectionServer) handleClient(client *Client) {
 			}
 
 		case "info":
-			// client.logger.Println("-> info")
+			// client.logger.Println("-> info to",msg.Dest)
+			//todo? проверить что сообщение самому себе - не нужно транслировать
+			// time.Sleep(time.Second)
+			// client.logger.Println("-> info *")
 			s.broadcast <- msg
 
 		default:
@@ -189,11 +193,11 @@ func (s *ConnectionServer) handleEvents() {
 		case message := <-s.broadcast:
 			// find := false
 			s.mutex.RLock()
-			timeter = time.Now()
 			// fmt.Println(message.Dest)
 			if cli, ok := s.clients[message.Dest]; ok == true {
-				fmt.Println(message.ClientID, "->", message.Dest, time.Since(timeter).Microseconds())
+				timeter = time.Now()
 				err := sendMsg(&message, cli.Writer)
+				fmt.Println(message.ClientID, "->", message.Dest, time.Since(timeter).Microseconds())
 				if err != nil {
 					// Если ошибка записи, помечаем клиента к удалению
 					s.unregister <- cli
