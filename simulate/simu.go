@@ -4,19 +4,22 @@ import (
 	"bufio"
 	"fmt"
 	"log"
-	"math/rand"
+
+	// "math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	// viks "viks"
 )
 
 const (
-	RUNMODE = 1    //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
-	CLIENTS = 1000 // [0001...1000]
+	RUNMODE = 1 //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
+	CLIENTS = 1 // [0001...1000]
 )
 
-var connects int
+var TotalScore int //счетчик подключений-отключений тестовый
 var ioCount int
 
 func main() {
@@ -26,7 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Ошибка загрузки конфигурации:", err)
 	}
-	fmt.Println(config)
+	// fmt.Println(config)
 
 	// new clients
 	tcc := []TCPClient{}
@@ -37,13 +40,13 @@ func main() {
 	// }
 	//клиенты new
 	// if RUNMODE == 1 {
-	for i := 1; i <= CLIENTS; i++ {
-		sid := fmt.Sprintf("%04d", i)
-		cli := ClientConfig{Id: sid, Passw: sid + "p"}
-		if i == 1 {
-			cli.Mode = "1"
-		}
-		client := NewTCPClient(cli, config)
+	for i := 0; i < CLIENTS; i++ {
+		// sid := fmt.Sprintf("%04d", i)
+		// cli := ClientConfig{Id: i, Passw: sid + "p"}
+		// if i == 1 {
+		// 	cli.Mode = "1"
+		// }
+		client := NewTCPClient(i, config)
 		tcc = append(tcc, *client)
 	}
 	// }
@@ -83,19 +86,35 @@ func (c *TCPClient) Start() error {
 	c.state = 1
 	c.say("Connected")
 
-	//отправка аутентификации - ожидание подтверждения
-	msg := Message{Type: "auth", ClientID: c.id, Data: c.passw}
-	if err = sendMsg(&msg, writer); err != nil {
-		return c.sayError("start", err)
+	//отправка запроса регистрации
+	vf := NewVikingFrame(TS_INFO, 0, 0, 0x20) //при регистрации addrs нули
+	vf.AddOption(0x50, c.conf.Info)
+	vf.AddOptionInt(0x51, c.id)
+	vf.AddOption(0x56, c.conf.Login)
+	vf.AddOption(0x57, c.conf.Passw)
+	vf.EndTx()
+	Send(vf.txb, writer)
+
+	//прием ответа со статусом регистрации
+	vf.Rxb, err =ReadPac(conn, reader, time.Duration(c.gconfig.Timeout))
+	if err != nil {
+		return err
 	}
-	if msg, err = readMsg(reader); err != nil {
-		return c.sayError("start", err)
+	opts := vf.GetOptions()
+	status := -1
+	if op, ok := opts[0x55]; ok == true {
+		is := IHL(op.Body)
+		if status == 4 || status == 3 || status == 1 {
+			status = is
+		}
+	} else {
+		fmt.Println("q1")
 	}
-	if msg.Type != "auth_ok" {
-		return c.sayError("auth", err)
+	if status < 0 {
+		return c.sayError("bad reg status", err)
 	}
 	c.state = 2
-	connects++
+	TotalScore++
 	c.say("Authorized")
 
 	// Запускаем периодическую отправку данных
@@ -106,13 +125,13 @@ func (c *TCPClient) Start() error {
 
 	c.Close()
 	c.say("exit")
-	connects--
+	TotalScore--
 	return nil
 }
 
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
 func (c *TCPClient) startHeartbeat() {
-	tickerPing := time.NewTicker(time.Duration(c.config.PingInterval) * time.Second)
+	tickerPing := time.NewTicker(time.Duration(c.gconfig.PingInterval) * time.Second)
 	tickerInfo := time.NewTicker(100 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
 	data := make([]byte, 10240)
@@ -121,26 +140,31 @@ func (c *TCPClient) startHeartbeat() {
 		tickerInfo.Stop()
 		// ticker3.Stop()
 	}()
+
+	//пакет для пинга
+	pif := NewVikingFrame(TS_INFO, 0, 0, 0x28)
+	pif.AddOptionInt(0x51, c.id) //PointID
+	pif.EndTx()
+	
 	destCount := 2
 	for {
 		select {
 		case <-tickerPing.C:
 			if c.state == 2 {
-				msg := Message{Type: "ping"} // Data: map[string]interface{}{"uptime": time.Since(time.Now()).String(), Timestamp: time.Now(),}
-				if err := sendMsg(&msg, c.Writer); err != nil {
-					c.sayError("shb1", err)
+				if err := Send(pif.txb, c.Writer); err != nil {
+					c.sayError("sendPing", err)
 					return
 				}
 				c.say("<- ping")
 			}
 
 		case <-tickerInfo.C:
-			if connects != CLIENTS { //еще не все подключены
+			if TotalScore != CLIENTS { //еще не все подключены
 				continue
 			}
 			switch RUNMODE {
 			case 1: //0001 передает сообщения на все другие
-				if c.id == "0001" {
+				if c.id == 1 {//"0001" {
 					msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount), Data: data}
 					destCount++
 					if destCount > CLIENTS {
@@ -188,21 +212,21 @@ func (c *TCPClient) startHeartbeat() {
 // startReceiving запускает прием данных от сервера
 func (c *TCPClient) startReceiving() {
 	for {
-		timeter := time.Now()
-		msg, err := readMsg(c.Reader)
-		fmt.Println("rx", time.Since(timeter).Milliseconds())
-		if err != nil {
-			c.sayError("rx", err)
-			return
-		}
-		ioCount--
-		switch msg.Type {
-		case "pong":
-			c.say("-> pong")
-		default:
-			c.say("=> " + msg.Type)
-		}
-		// time.Sleep(time.Second)
+		// timeter := time.Now()
+		// msg, err := readMsg(c.Reader)
+		// fmt.Println("rx", time.Since(timeter).Milliseconds())
+		// if err != nil {
+		// 	c.sayError("rx", err)
+		// 	return
+		// }
+		// ioCount--
+		// switch msg.Type {
+		// case "pong":
+		// 	c.say("-> pong")
+		// default:
+		// 	c.say("=> " + msg.Type)
+		// }
+		time.Sleep(time.Second)
 	}
 
 	// buffer := make([]byte, 4096)

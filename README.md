@@ -2,6 +2,9 @@
 Автор: Чуркин Владимир `xeon48@gmail.com`
 Начало разработки: 14-05-2026
 
+# Текущие вопросы
+1.Регистрация клиента на сервере, Клиент передаёт на сервер пакет регистрации:    destadr,srcadr = 0,0 ? - да
+
 
 # CHANGELOG
 
@@ -35,10 +38,15 @@ v1.0 19-05-2026
 
 
 # Build & Run
+
 ~~go env -w GO111MODULE="on"~~
 ~~go env GO111MODULE~~
-~~go mod init viks3~~
 ~~настроен одновременный запуск в launch."compounds"~~, но удобнее запускать в разных окнах vscode
-не получилось зашарить common.go - при обновлении его копировать в /simulate
+не получается зашарить common.go и vikingframe.go  для /simulate - нужно всегда копировать при обновлении
+
+go env GO111MODULE
+go env -w GO111MODULE="off"
+
+
 
  

@@ -7,38 +7,40 @@ import (
 	"log"
 	"net"
 	"time"
-	// co "viks"
 )
 
 // Config — структура конфигурации
 type Config struct {
 	ServerAddress string         `json:"server"`
 	PingInterval  int            `json:"ping_interval"`
+	Timeout       int            `json:"timeout"` //ms
 	Clients       []ClientConfig `json:"clients"`
 }
 type ClientConfig struct {
-	Id    string
-	Passw string
-	Mode  string
+	Id    int    `json:"id"`
+	Info  string `json:"info"`
+	Login string `json:"login"`
+	Passw string `json:"passw"`
+	Mode  string //tst
 }
 
 // TCPClient — структура TCP-клиента
 type TCPClient struct {
-	config          *Config
-	id, passw, mode string
-	state           int //1-connected, 2-authorized, 9-closed
-	conn            net.Conn
-	Writer          *bufio.Writer
-	Reader          *bufio.Reader
+	gconfig *Config
+	conf    *ClientConfig
+	id      int
+	state   int //1-connected, 2-authorized, 9-closed
+	conn    net.Conn
+	Writer  *bufio.Writer
+	Reader  *bufio.Reader
 }
 
 // NewTCPClient создает новый TCP-клиент
-func NewTCPClient(cli ClientConfig, conf *Config) *TCPClient {
+func NewTCPClient(idx int, gconf *Config) *TCPClient {
 	return &TCPClient{
-		config: conf,
-		id:     cli.Id,
-		passw:  cli.Passw,
-		mode:   cli.Mode,
+		gconfig: gconf,
+		conf:    &gconf.Clients[idx],
+		id:      gconf.Clients[idx].Id,
 	}
 }
 func (c *TCPClient) say(m string) {
@@ -66,7 +68,7 @@ func (c *TCPClient) connectWithRetries(maxRetries int, timeout time.Duration) (n
 	dialer := net.Dialer{
 		Timeout: timeout,
 	}
-	address := c.config.ServerAddress
+	address := c.gconfig.ServerAddress
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		// c.say(fmt.Sprintf("Попытка %d подключения к %s...", attempt, address))
 		conn, err := dialer.Dial("tcp", address)

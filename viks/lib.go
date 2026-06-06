@@ -23,14 +23,14 @@ func LoadConfig(fpath string) (*ServerConfig, error) {
 }
 
 // Загружает учётные данные из файла
-func loadAuthCredentials(filename string) ([]AuthCredentials, error) {
+func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось открыть файл аутентификации: %v", err)
 	}
 	defer file.Close()
 
-	var credentials []AuthCredentials
+	var credentials []AuthCredential
 	decoder := json.NewDecoder(file)
 	err = decoder.Decode(&credentials)
 	if err != nil {

@@ -12,25 +12,28 @@ import (
 type ServerConfig struct {
 	Port             string `json:"port"`
 	MaxConnections   int    `json:"max_connections"`
+	WaitReg          int    `json:"wait_reg"` //ожидание пакета регистрации
 	LogFile          string `json:"log_file"`
 	KeepAlivePeriod  int    `json:"keep_alive_period"`
 	KeepAliveTimeout int    `json:"keep_alive_timeout"`
 }
 
 // Структура учётных данных
-type AuthCredentials struct {
+type AuthCredential struct {
+	Id       int    `json:"id"`
+	Info     string `json:"info"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
 // Сервер соединений
 type ConnectionServer struct {
-	clients         map[string] *Client
+	clients         map[string]*Client
 	register        chan *Client
 	unregister      chan *Client
-	broadcast       chan Message
+	// broadcast       chan Message
 	config          *ServerConfig
-	credentials     []AuthCredentials
+	credentials     []AuthCredential //todo to map?
 	connectionCount int
 	mutex           sync.RWMutex
 	logger          *log.Logger
@@ -66,7 +69,7 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 		clients:         make(map[string]*Client),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
-		broadcast:       make(chan Message), //[]byte),
+		// broadcast:       make(chan Message), //[]byte),
 		config:          config,
 		credentials:     credentials,
 		connectionCount: 0,
