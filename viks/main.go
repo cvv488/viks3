@@ -78,28 +78,31 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 
 	reader := bufio.NewReader(conn) //def buf 4k, writer := bufio.NewWriterSize(conn, 8192) // буфер 8 КБ
 	writer := bufio.NewWriter(conn)
-
 	if err := clearBufferSafe(reader, 4096); err != nil { // максимум 4 КБ мусора
 		s.logger.Printf("Слишком много мусора в буфере")
 		return
 	}
 
 	//ждем аутентификацию
-	bb, err := ReadPac(conn, reader, time.Duration(s.config.WaitReg)*time.Second)
+	bb, err := ReadPac(conn, reader, s.config.WaitReg)
 	if err != nil {
-		fmt.Println("не дождались пакет регистрации")
+		fmt.Println("не дождался пакет регистрации")
 		return
 	}
-	vf := VikingFrame{}
-	vf.Rxb = bb
-	opts := vf.GetOptions()
-	//по полученному pointId найти его в списке разрешенных
-	pointId := -1
-	if op, ok := opts[0x51]; ok == true {
-		pointId = IHL(op.Body)
-	} else {
-		//no poindId
+	vf := NewVikingFrameRx(bb)
+	if vf.msgid != 0x20 {
+		fmt.Println("не дождался пакет регистрации 20")
+		return
 	}
+	opts := vf.GetOptions()
+	//по полученному pointId найти его в списке разрешенных (в конфигурации)
+	op, ok := opts[0x51]
+	if ok != true {
+		fmt.Print("no opt")
+		return
+	}
+	pointId := IHL(op.Body)
+
 	var cre *AuthCredential
 	for i, pid := range s.credentials {
 		if pid.Id == pointId { //есть в списке
@@ -108,116 +111,144 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		}
 	}
 	if cre == nil {
-		fmt.Println("не в списке")
+		fmt.Println("нет в списке")
 		return
 	}
+	//проверить логин и пароль если есть
+	if cre.Username != "" {
+		op, ok := opts[0x56]
+		if ok != true {
+			fmt.Println("нет юзера")
+			return
+		}
+		if cre.Username != string(op.Body) {
+			fmt.Println("не верный юзер")
+			// 	s.logger.Printf("Отклонено подключение от %s: неверные учётные данные", conn.RemoteAddr().String())
+			return
+		}
+	}
+	if cre.Password != "" {
+		op, ok := opts[0x57]
+		if ok != true {
+			fmt.Println("нет пароля")
+			return
+		}
+		if cre.Password != string(op.Body) {
+			fmt.Println("не верный пароль")
+			return
+		}
+	}
+	//todo7 если такой уже есть отключить оба!
 
-	//отправка ответа регистрации
-	txf := NewVikingFrame(TS_INFO, 0, 0, 0x21)
-	txf.AddOptionInt(0x51, pointId) //NetID
-	txf.AddOptionInt(0x55, 4)       //Статус
+	// Успешная аутентификация - ответить клиенту
+	txf := NewVikingFrame(TS_INFO, pointId, 0, 0x21) //todo уточнить destAdr=pointId ?
+	txf.AddOptionInt(0x52, pointId)                  //NetID
+	txf.AddOptionInt(0x55, 4)                        //Статус
 	txf.EndTx()
-	Send(txf.txb, writer)
+	err = Send(txf.txb, conn, writer, s.config.Timeout)
+	if err != nil {
+		s.logger.Println(err)
+		return
+	}
+	logger := NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 
-	// if op, ok := opts[0x56]; ok == true {
-	// 	op.Body
-	// }
-
-	// for _, op := range vf.GetOptions() {
-	// 	if op.code == 0x55 {
-	// 		if op.body[0] == 4 || op.body[0] == 3 || op.body[0] == 1 {
-	// 			rxregistered = 1
-	// 		} else {
-	// 			rxregistered = -2
-	// 		}
-	// 		break
-	// 	}
-	// }
-
-	// msg, err := readMsg(reader)
-	// if err != nil {
-	// 	s.logger.Printf("%v", err)
-	// 	return
-	// }
-
-	// authenticated := false
-	// if passw, ok := msg.Data.(string); ok {
-	// 	// Проверяем учётные данные
-	// 	for _, cred := range s.credentials {
-	// 		if cred.Username == msg.ClientID && cred.Password == passw {
-	// 			authenticated = true
-	// 			break
-	// 		}
-	// 	}
-	// } else {
-	// 	s.logger.Printf("bad data passw")
-	// 	return
-	// }
-	// if !authenticated {
-	// 	conn.Close()
-	// 	s.logger.Printf("Отклонено подключение от %s: неверные учётные данные", conn.RemoteAddr().String())
-	// 	return
-	// }
-	// Успешная аутентификация - ответить клиенту откуда пришло
-	// msg2 := Message{Type: "auth_ok", ClientID: SERVERID, Dest: msg.ClientID}
-	// err = sendMsg(&msg2, writer)
-	// if err != nil {
-	// 	s.logger.Println(err)
-	// 	return
-	// }
-
-	// logger := co.NewLogger(s.config.LogFile, msg.ClientID) //у каждого клиента
-
-	// client := &Client{
-	// 	Conn:     conn,
-	// 	Writer:   writer,
-	// 	Reader:   reader,
-	// 	Idc:      msg.ClientID,
-	// 	LastPing: time.Now(),
-	// 	logger:   logger,
-	// }
+	client := &Client{
+		Conn:     conn,
+		Writer:   writer,
+		Reader:   reader,
+		Idc:      pointId,
+		LastPing: time.Now(),
+		logger:   logger,
+	}
 	// s.register <- client
-	// // s.logger.Printf("Клиент %s успешно аутентифицирован", msg.ClientID)
-	// go s.handleClient(client)
+	logger.Println("успешно аутентифицирован")
+	client.handleClient(s)
+	logger.Println("exit")
 }
 
 // Обрабатывает сообщения от конкретного клиента
-// func (s *ConnectionServer) handleClient(client *Client) {
-// 	defer func() {
-// 		s.unregister <- client
-// 	}()
-// 	for {
-// 		msg, err := readMsg(client.Reader)
-// 		if err != nil {
-// 			client.logger.Println(err)
-// 			return
-// 		}
-// 		switch msg.Type {
-// 		case "ping":
-// 			client.logger.Println("-> ping")
-// 			client.Mutex.Lock()
-// 			client.LastPing = time.Now()
-// 			client.Mutex.Unlock()
+func (c *Client) handleClient(s *ConnectionServer) {
+	defer func() {
+		s.unregister <- c
+	}()
 
-// 			msg.Type = "pong"
-// 			err = sendMsg(&msg, client.Writer)
-// 			if err != nil {
-// 				client.logger.Println(err)
-// 				return
-// 			}
+	//пакет ответа на пинг // В ответ сервер передаёт клиенту пакет подтверждения, содержащий следующие опции: PointID (0x51); NetID (0x52); Статус (0x55).
+	pif := NewVikingFrame(TS_INFO, c.Idc, 0, 0x29)
+	pif.AddOptionInt(0x51, c.Idc) //PointID
+	pif.AddOptionInt(0x52, c.Idc) //NetID
+	pif.AddOptionInt(0x55, 4)          //Статус
+	pif.EndTx()
 
-// 		case "info":
-// 			// client.logger.Println("-> info to",msg.Dest)
-// 			//todo? проверить что сообщение самому себе - не нужно транслировать
-// 			// time.Sleep(time.Second)
-// 			// client.logger.Println("-> info *")
-// 			s.broadcast <- msg
+	for {
+		bb, err := ReadPac(c.Conn, c.Reader, 0) //ждать без таймаута
+		if err != nil {
+			c.logger.Println("не дождался", err)
+			return
+		}
+		c.logger.Println("->")
 
-// 		default:
-// 			client.logger.Println("Получен:", msg.Type)
-// 		}
-// 	}
-// }
+		vf := NewVikingFrameRx(bb)
+		switch vf.msgid {
+		// case 0x20, //запрос на регистрацию
+		// 0x21: //ответ на запрос о регистрации
+
+		// 0x22 – запрос статуса клиента
+		// 0x23 – ответ на запрос статуса клиента
+		// 0x24 – уведомление о подключении/отключении клиента
+		case 0x28: //Запрос “Keep alive”
+			err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
+			if err != nil {
+				c.logger.Println(err)
+				return
+			}
+			c.logger.Println("<-")
+
+			// 0x29 – ответ на запрос “Keep alive”
+			// 0x30 – подписка на уведомление о подключении/отключении клиента
+			// 0x31 – ответ сервера на команду подписки
+			// 0x32 – запрос статуса подписки
+			// 0xFE – команда не поддерживается
+		}
+
+		// opts := rxf.GetOptions()
+		// op, ok := opts[0x51]
+		// if ok != true {
+		// 	fmt.Print("no opt")
+		// 	return
+		// }
+		// pointId := IHL(op.Body)
+
+		// msg, err := readMsg(client.Reader)
+		// if err != nil {
+		// 	client.logger.Println(err)
+		// 	return
+		// }
+		// switch msg.Type {
+		// case "ping":
+		// 	client.logger.Println("-> ping")
+		// 	client.Mutex.Lock()
+		// 	client.LastPing = time.Now()
+		// 	client.Mutex.Unlock()
+
+		// 	msg.Type = "pong"
+		// 	err = sendMsg(&msg, client.Writer)
+		// 	if err != nil {
+		// 		client.logger.Println(err)
+		// 		return
+		// 	}
+
+		// case "info":
+		// client.logger.Println("-> info to",msg.Dest)
+		//todo? проверить что сообщение самому себе - не нужно транслировать
+		// time.Sleep(time.Second)
+		// client.logger.Println("-> info *")
+		// s.broadcast <- msg
+
+		// default:
+		// 	client.logger.Println("Получен:", msg.Type)
+		// }
+	}
+}
 
 // Обрабатывает события регистрации/удаления клиентов и рассылку сообщений
 // func (s *ConnectionServer) handleEvents() {

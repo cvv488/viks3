@@ -79,11 +79,16 @@ func NewVikingFrame(typem byte, dest, src int, mid byte) *VikingFrame {
 	}
 }
 
-// func NewVikingFrame(types byte, mid byte) *VikingFrame {
-// 	return &VikingFrame{
-// 		ts: types, msgid: mid, buffer: make([]byte, 0, 1024),
-// 	}
-// }
+//создает на основе пришедших байт
+func NewVikingFrameRx(rxb []byte) *VikingFrame {
+	return &VikingFrame{
+		tid: rxb[0],
+		destadr: IHL(rxb[1:]),
+		srcadr: IHL(rxb[3:]),
+		msgid: rxb[5],
+		Rxb: rxb,
+	}
+}
 
 func (vf *VikingFrame) AddOption(code byte, vv string) {
 	vf.txb = append(vf.txb, code)
@@ -109,6 +114,56 @@ func (vf *VikingFrame) EndTx() {
 	vf.txb = append(vf.txb, hi)
 	vf.txb = append(vf.txb, lo)
 }
+
+func (vf *VikingFrame) GetOptions() map[int]Option {
+	opts := map[int]Option{}
+	pos := 6 //8 без lenb
+	for pos < len(vf.Rxb) {
+		code := vf.Rxb[pos]
+		if code == 0xff {
+			break
+		}
+		lenOpt := int(vf.Rxb[pos+1])
+		if pos+lenOpt+2 < len(vf.Rxb) {
+			// opts = append(opts, Option{code: code, body: vf.Rxb[pos+2 : pos+len+2]})
+			opts[int(code)] = Option{Code: code, Body: vf.Rxb[pos+2 : pos+lenOpt+2]}
+		}
+		pos += lenOpt + 2
+	}
+	return opts
+}
+
+// dd := "00-2C-80-00-00-00-00 20 50inf-11-(54-4D-44-52-56-20-76-2E-33-2E-39-2E-31-2E-31-33-39-)	51pid-02-(01-01-)	56-05-(41-64-6D-69-6E-)	57-05-(61-64-6D-69-6E-)	FF"
+// //-	3E-EB"
+// bb,_ := HexToBuf(dd)
+// fmt.Println(BufToHex(bb))
+// vf.buffer=bb
+// crc:= CRC(bb)
+// fmt.Printf("%X", crc)
+func Crc(bb []byte) (hi byte, lo byte) {
+	if len(bb) > 0 {
+		var data uint16
+		var crc uint16 = 0xFFFF
+		for _, v := range bb {
+			data = uint16(v)
+			for range 8 {
+				if ((crc ^ data) & 1) != 0 {
+					crc = (crc >> 1) ^ 0x8408
+				} else {
+					crc >>= 1
+				}
+				data >>= 1
+			}
+		}
+		crc = ^crc
+		hi = byte(crc >> 8)
+		lo = byte(crc)
+		// vf.txb = append(vf.txb, byte(crc>>8))
+		// vf.txb = append(vf.txb, byte(crc))
+	}
+	return
+}
+
 
 // func (vf *VikingFrame) Add(ii int) { //HL
 // 	vf.buffer = append(vf.buffer, byte(ii>>8))
@@ -175,52 +230,3 @@ func (vf *VikingFrame) EndTx() {
 
 // 	return buffer[dataStart:crcStart], nil
 // }
-
-func (vf *VikingFrame) GetOptions() map[int]Option {
-	opts := map[int]Option{}
-	pos := 6 //8 без lenb
-	for pos < len(vf.Rxb) {
-		code := vf.Rxb[pos]
-		if code == 0xff {
-			break
-		}
-		lenOpt := int(vf.Rxb[pos+1])
-		if pos+lenOpt+2 < len(vf.Rxb) {
-			// opts = append(opts, Option{code: code, body: vf.Rxb[pos+2 : pos+len+2]})
-			opts[int(code)] = Option{Code: code, Body: vf.Rxb[pos+2 : pos+lenOpt+2]}
-		}
-		pos += lenOpt + 2
-	}
-	return opts
-}
-
-// dd := "00-2C-80-00-00-00-00 20 50inf-11-(54-4D-44-52-56-20-76-2E-33-2E-39-2E-31-2E-31-33-39-)	51pid-02-(01-01-)	56-05-(41-64-6D-69-6E-)	57-05-(61-64-6D-69-6E-)	FF"
-// //-	3E-EB"
-// bb,_ := HexToBuf(dd)
-// fmt.Println(BufToHex(bb))
-// vf.buffer=bb
-// crc:= CRC(bb)
-// fmt.Printf("%X", crc)
-func Crc(bb []byte) (hi byte, lo byte) {
-	if len(bb) > 0 {
-		var data uint16
-		var crc uint16 = 0xFFFF
-		for _, v := range bb {
-			data = uint16(v)
-			for range 8 {
-				if ((crc ^ data) & 1) != 0 {
-					crc = (crc >> 1) ^ 0x8408
-				} else {
-					crc >>= 1
-				}
-				data >>= 1
-			}
-		}
-		crc = ^crc
-		hi = byte(crc >> 8)
-		lo = byte(crc)
-		// vf.txb = append(vf.txb, byte(crc>>8))
-		// vf.txb = append(vf.txb, byte(crc))
-	}
-	return
-}

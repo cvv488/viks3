@@ -1,7 +1,8 @@
 {
   "port": "45000",
   "max_connections": 10000,
-  "wait_reg":10,
+  "wait_reg":10000,
+  "timeout": 10000,
   "xx log_file": "server.log",
   "keep_alive_period": 10,
   "keep_alive_timeout": 10

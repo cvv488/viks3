@@ -1,9 +1,8 @@
 package main
 
-//VER 2
 import (
 	"bufio"
-	"encoding/binary"
+	// "encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -108,14 +107,23 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 }
 
 // быстрый - без аллокаций и внешнего буфера
-// Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов.
-func ReadPac(conn net.Conn, reader *bufio.Reader, timeout time.Duration) ([]byte, error) {
+// если указан timeoutms ждем первые 2 байта с этим таймаутом или вечно, но следующие байты всегда дочитываются с таймаутом 5с
+// Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
+func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error) {
 	const pref = "ReadPac:"
-	// чтение длины пакета[2] с дедлайном
-	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
+	//установка или сброс тамаута
+	if timeoutms > 0 {
+		timeout := time.Duration(timeoutms) * time.Millisecond
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil { //не одноразовый
+			return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
+		}
+	} else {
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
+		}
 	}
-	lenb, err := reader.Peek(2) //если в буфере нет будет ждать 2 байта
+	// чтение длины пакета[2]
+	lenb, err := reader.Peek(2) //если в буфере нет - будет ждать 2 байта
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return nil, fmt.Errorf("%v timeout", pref)
@@ -128,11 +136,11 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeout time.Duration) ([]byte
 	}
 
 	//и чтение тела пакета с дедлайном
-	length := int(binary.BigEndian.Uint16(lenb)) // осталось принять lenb-2+2&crc
+	length := IHL(lenb) // осталось принять lenb-2+2&crc
 	if length < 3 {
 		return nil, fmt.Errorf("%v len=0", pref)
 	}
-	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
 		return nil, fmt.Errorf("%v setTimeout2: %v", pref, err)
 	}
 	result, err := reader.Peek(length)
@@ -149,13 +157,18 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeout time.Duration) ([]byte
 	return result, nil //возвращает тело пакета без len[2]
 }
 
-func Send(bb []byte, writer *bufio.Writer) error {
+func Send(bb []byte, conn net.Conn, writer *bufio.Writer, timeoutms int) error {
+	conn.SetWriteDeadline(time.Now().Add(time.Duration(timeoutms) * time.Millisecond))
 	_, err := writer.Write(bb)
 	if err != nil {
 		return fmt.Errorf("Send_write: %v", err)
 	}
 	if err = writer.Flush(); err != nil {
-		return fmt.Errorf("Send_flush: %v", err)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return fmt.Errorf("Send_flush: timeout")
+		} else {
+			return fmt.Errorf("Send_flush: %v", err)
+		}
 	}
 	return nil
 }

@@ -1,18 +1,20 @@
 {
     "rem": "simu clients v1",
     "server": "localhost:45000",
-    "ping_interval": 600,
+    "ping_interval": 10,
     "timeout": 5000,
     "clients": [
         {
             "id": 1,
             "info":"Info1",
-            "login":"Login1",
-            "passw": "Passw1"
+            "user":"user1",
+            "passw": "passw1"
         },
         {
             "id": 2,
-            "passw": "0002p"
+            "info":"Info2",
+            "user":"user2",
+            "passw": "passw2"
         }
     ]
 }

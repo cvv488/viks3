@@ -13,13 +13,13 @@ import (
 type Config struct {
 	ServerAddress string         `json:"server"`
 	PingInterval  int            `json:"ping_interval"`
-	Timeout       int            `json:"timeout"` //ms
+	Timeout       int            `json:"timeout"`
 	Clients       []ClientConfig `json:"clients"`
 }
 type ClientConfig struct {
 	Id    int    `json:"id"`
 	Info  string `json:"info"`
-	Login string `json:"login"`
+	User  string `json:"user"`
 	Passw string `json:"passw"`
 	Mode  string //tst
 }
@@ -33,6 +33,19 @@ type TCPClient struct {
 	conn    net.Conn
 	Writer  *bufio.Writer
 	Reader  *bufio.Reader
+}
+
+func LoadConfig(fpath string) (*Config, error) {
+	bb, err := ReadFileToBytesJson(fpath)
+	if err != nil {
+		return nil, err
+	}
+	var config Config
+	err = json.Unmarshal(bb, &config)
+	if err != nil {
+		return nil, err
+	}
+	return &config, err
 }
 
 // NewTCPClient создает новый TCP-клиент
@@ -49,19 +62,6 @@ func (c *TCPClient) say(m string) {
 func (c *TCPClient) sayError(m string, e error) error {
 	log.Println(c.id, "ERROR:", m, e.Error())
 	return e
-}
-
-func LoadConfig(fpath string) (*Config, error) {
-	bb, err := ReadFileToBytesJson(fpath)
-	if err != nil {
-		return nil, err
-	}
-	var config Config
-	err = json.Unmarshal(bb, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, err
 }
 
 func (c *TCPClient) connectWithRetries(maxRetries int, timeout time.Duration) (net.Conn, error) {
@@ -83,6 +83,11 @@ func (c *TCPClient) connectWithRetries(maxRetries int, timeout time.Duration) (n
 		}
 	}
 	return nil, c.sayError("", fmt.Errorf("не удалось подключиться к %s после %d попыток", address, maxRetries))
+}
+
+func (c *TCPClient) Send(bb []byte) (err error) {
+	err = Send(bb, c.conn, c.Writer, c.gconfig.Timeout)
+	return
 }
 
 // func (c *TCPClient) readCon() (buffer []byte, err error) {

@@ -6,11 +6,12 @@ import (
 	"log"
 
 	// "math/rand"
+
+	// "math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
 	// viks "viks"
 )
 
@@ -78,37 +79,47 @@ func (c *TCPClient) Start() error {
 	if err != nil {
 		return err
 	}
-	c.conn = conn
 	writer := bufio.NewWriter(conn)
-	c.Writer = writer
 	reader := bufio.NewReader(conn)
+	c.conn = conn
+	c.Writer = writer
 	c.Reader = reader
 	c.state = 1
 	c.say("Connected")
 
 	//отправка запроса регистрации
-	vf := NewVikingFrame(TS_INFO, 0, 0, 0x20) //при регистрации addrs нули
+	vf := NewVikingFrame(TS_INFO, 0, 0, 0x20)
 	vf.AddOption(0x50, c.conf.Info)
 	vf.AddOptionInt(0x51, c.id)
-	vf.AddOption(0x56, c.conf.Login)
+	vf.AddOption(0x56, c.conf.User)
 	vf.AddOption(0x57, c.conf.Passw)
 	vf.EndTx()
-	Send(vf.txb, writer)
-
-	//прием ответа со статусом регистрации
-	vf.Rxb, err =ReadPac(conn, reader, time.Duration(c.gconfig.Timeout))
+	err = Send(vf.txb, conn, writer, c.gconfig.Timeout)
 	if err != nil {
+		fmt.Println("send")
 		return err
 	}
-	opts := vf.GetOptions()
+
+	//прием ответа со статусом регистрации
+	bb, err := ReadPac(conn, reader, c.gconfig.Timeout)
+	if err != nil {
+		fmt.Println("readp")
+		return err
+	}
+	rxf := NewVikingFrameRx(bb)
+	if rxf.msgid != 0x21 {
+		fmt.Println("21")
+		return err
+	}
+	opts := rxf.GetOptions()
 	status := -1
 	if op, ok := opts[0x55]; ok == true {
 		is := IHL(op.Body)
-		if status == 4 || status == 3 || status == 1 {
+		if is == 4 || is == 3 || is == 1 {
 			status = is
 		}
 	} else {
-		fmt.Println("q1")
+		fmt.Println("op55")
 	}
 	if status < 0 {
 		return c.sayError("bad reg status", err)
@@ -134,7 +145,8 @@ func (c *TCPClient) startHeartbeat() {
 	tickerPing := time.NewTicker(time.Duration(c.gconfig.PingInterval) * time.Second)
 	tickerInfo := time.NewTicker(100 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
-	data := make([]byte, 10240)
+	// data := make([]byte, 10240)
+
 	defer func() {
 		tickerPing.Stop()
 		tickerInfo.Stop()
@@ -145,13 +157,13 @@ func (c *TCPClient) startHeartbeat() {
 	pif := NewVikingFrame(TS_INFO, 0, 0, 0x28)
 	pif.AddOptionInt(0x51, c.id) //PointID
 	pif.EndTx()
-	
-	destCount := 2
+
+	// destCount := 2
 	for {
 		select {
 		case <-tickerPing.C:
 			if c.state == 2 {
-				if err := Send(pif.txb, c.Writer); err != nil {
+				if err := c.Send(pif.txb); err != nil {
 					c.sayError("sendPing", err)
 					return
 				}
@@ -162,47 +174,46 @@ func (c *TCPClient) startHeartbeat() {
 			if TotalScore != CLIENTS { //еще не все подключены
 				continue
 			}
-			switch RUNMODE {
-			case 1: //0001 передает сообщения на все другие
-				if c.id == 1 {//"0001" {
-					msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount), Data: data}
-					destCount++
-					if destCount > CLIENTS {
-						destCount = 2
-					}
-					timeter := time.Now()
-					if err := sendMsg(&msg, c.Writer); err != nil {
-						c.sayError("shb2", err)
-						return
-					}
-					fmt.Println()
-					s := fmt.Sprintf("<- info to %v c=%v tim=%v", msg.Dest, ioCount, time.Since(timeter).Milliseconds())
-					c.say(s) //"<- info to " + msg.Dest)
-					// c.say("<- info to " + msg.Dest)
-					ioCount++
-				}
-			case 2: //все всем рандомно
-				randomDest := rand.Intn(CLIENTS) + 1 //может и сам себе
-				msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", randomDest)}
-				if err := sendMsg(&msg, c.Writer); err != nil {
-					c.sayError("shb3", err)
-					return
-				}
-				c.say("<- info to rand " + msg.Dest)
+			// switch RUNMODE {
+			// case 1: //0001 передает сообщения на все другие
+			// 	if c.id == 1 { //"0001" {
+			// 		msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", destCount), Data: data}
+			// 		destCount++
+			// 		if destCount > CLIENTS {
+			// 			destCount = 2
+			// 		}
+			// 		timeter := time.Now()
+			// 		if err := sendMsg(&msg, c.Writer); err != nil {
+			// 			c.sayError("shb2", err)
+			// 			return
+			// 		}
+			// 		fmt.Println()
+			// 		s := fmt.Sprintf("<- info to %v c=%v tim=%v", msg.Dest, ioCount, time.Since(timeter).Milliseconds())
+			// 		c.say(s) //"<- info to " + msg.Dest)
+			// 		// c.say("<- info to " + msg.Dest)
+			// 		ioCount++
+			// 	}
+			// case 2: //все всем рандомно
+			// 	randomDest := rand.Intn(CLIENTS) + 1 //может и сам себе
+			// 	msg := Message{Type: "info", ClientID: c.id, Dest: fmt.Sprintf("%04d", randomDest)}
+			// 	if err := sendMsg(&msg, c.Writer); err != nil {
+			// 		c.sayError("shb3", err)
+			// 		return
+			// 	}
+			// 	c.say("<- info to rand " + msg.Dest)
 
-			case 3: //все посылают в один
-				if c.id != "0001" {
-					msg := Message{Type: "info", ClientID: c.id, Dest: "0001"}
-					if err := sendMsg(&msg, c.Writer); err != nil {
-						c.sayError("shb2", err)
-						return
-					}
-					s := fmt.Sprintf("<- info to %v c=%v", msg.Dest, ioCount)
-					c.say(s) //"<- info to " + msg.Dest)
-					ioCount++
-				}
-
-			}
+			// case 3: //все посылают в один
+			// 	if c.id != "0001" {
+			// 		msg := Message{Type: "info", ClientID: c.id, Dest: "0001"}
+			// 		if err := sendMsg(&msg, c.Writer); err != nil {
+			// 			c.sayError("shb2", err)
+			// 			return
+			// 		}
+			// 		s := fmt.Sprintf("<- info to %v c=%v", msg.Dest, ioCount)
+			// 		c.say(s) //"<- info to " + msg.Dest)
+			// 		ioCount++
+			// 	}
+			// }
 
 			// case <-ticker3.C:
 		}

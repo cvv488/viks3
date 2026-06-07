@@ -8,11 +8,24 @@ import (
 	"time"
 )
 
-// Структура конфигурации сервера
+type ConnectionServer struct {
+	clients    map[string]*Client
+	register   chan *Client
+	unregister chan *Client
+	// broadcast       chan Message
+	config          *ServerConfig
+	credentials     []AuthCredential //todo to map?
+	connectionCount int
+	mutex           sync.RWMutex
+	logger          *log.Logger
+	keepAliveTicker *time.Ticker // тикер для периодических проверок
+}
+
 type ServerConfig struct {
 	Port             string `json:"port"`
 	MaxConnections   int    `json:"max_connections"`
-	WaitReg          int    `json:"wait_reg"` //ожидание пакета регистрации
+	WaitReg          int    `json:"wait_reg"` //ожидание пакета регистрации, мс
+	Timeout          int    `json:"timeout"`  //read/write timeout, мс
 	LogFile          string `json:"log_file"`
 	KeepAlivePeriod  int    `json:"keep_alive_period"`
 	KeepAliveTimeout int    `json:"keep_alive_timeout"`
@@ -26,23 +39,8 @@ type AuthCredential struct {
 	Password string `json:"password"`
 }
 
-// Сервер соединений
-type ConnectionServer struct {
-	clients         map[string]*Client
-	register        chan *Client
-	unregister      chan *Client
-	// broadcast       chan Message
-	config          *ServerConfig
-	credentials     []AuthCredential //todo to map?
-	connectionCount int
-	mutex           sync.RWMutex
-	logger          *log.Logger
-	keepAliveTicker *time.Ticker // тикер для периодических проверок
-}
-
-// Клиент с аутентификацией и keep‑alive
 type Client struct {
-	Idc      string
+	Idc      int
 	Conn     net.Conn
 	Writer   *bufio.Writer
 	Reader   *bufio.Reader
@@ -66,9 +64,9 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 	logger := NewLogger(config.LogFile, "SRVR")
 
 	return &ConnectionServer{
-		clients:         make(map[string]*Client),
-		register:        make(chan *Client),
-		unregister:      make(chan *Client),
+		clients:    make(map[string]*Client),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
 		// broadcast:       make(chan Message), //[]byte),
 		config:          config,
 		credentials:     credentials,
