@@ -60,7 +60,7 @@ func clearBufferSafe(reader *bufio.Reader, maxBytes int) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("превышен лимит очистки: прочитано %d байт", discarded)
+	return fmt.Errorf("clearBufferSafe: превышен лимит очистки, прочитано %d байт", discarded)
 }
 
 // func (s *ConnectionServer) readMsg(reader *bufio.Reader) (Message, error) {

@@ -7,6 +7,9 @@
 
 
 # CHANGELOG
+v1.3 12-06-2026
+- Включен режим модулей для нормального импорта
+- Добавлен логер zerolog, *логирование
 
 v1.2 23-05-2026
 - add RUNMODE=2 нагрузочный тест: все клиенты посылают всем рандомно
@@ -39,13 +42,14 @@ v1.0 19-05-2026
 
 # Build & Run
 
-~~go env -w GO111MODULE="on"~~
-~~go env GO111MODULE~~
 ~~настроен одновременный запуск в launch."compounds"~~, но удобнее запускать в разных окнах vscode
 не получается зашарить common.go и vikingframe.go  для /simulate - нужно всегда копировать при обновлении
 
+Включен режим модулей для нормального импорта:
 go env GO111MODULE
-go env -w GO111MODULE="off"
+go env -w GO111MODULE="on"
+go mod init viks3
+go mod tidy
 
 
 

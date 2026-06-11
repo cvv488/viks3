@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"log"
+	// "log"
 	"net"
 	"sync"
 	"time"
@@ -17,7 +17,7 @@ type ConnectionServer struct {
 	credentials     []AuthCredential //todo to map?
 	connectionCount int
 	mutex           sync.RWMutex
-	logger          *log.Logger
+	// logger          *log.Logger
 	keepAliveTicker *time.Ticker // тикер для периодических проверок
 }
 
@@ -41,12 +41,20 @@ type AuthCredential struct {
 
 type Client struct {
 	Idc      int
+	ids      string //строка-id для лога
 	Conn     net.Conn
 	Writer   *bufio.Writer
 	Reader   *bufio.Reader
 	LastPing time.Time // время последнего успешного пинга
 	Mutex    sync.Mutex
-	logger   *log.Logger
+	// logger   *log.Logger
+}
+
+func (cli *Client) say(msg string) {
+	say(cli.ids + ": " + msg)
+}
+func (cli *Client) sayError(msg string, err error) {
+	sayError(cli.ids+": "+msg, err)
 }
 
 // Создаёт новый сервер соединений с загрузкой конфигурации
@@ -61,7 +69,7 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 		return nil, err
 	}
 
-	logger := NewLogger(config.LogFile, "SRVR")
+	// logger := NewLogger(config.LogFile, "SRVR")
 
 	return &ConnectionServer{
 		clients:    make(map[string]*Client),
@@ -71,6 +79,6 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 		config:          config,
 		credentials:     credentials,
 		connectionCount: 0,
-		logger:          logger,
+		// logger:          logger,
 	}, nil
 }

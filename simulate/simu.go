@@ -74,10 +74,11 @@ func main() {
 }
 
 // Start запускает клиента
-func (c *TCPClient) Start() error {
+func (c *TCPClient) Start() {
 	conn, err := c.connectWithRetries(99, time.Second*10)
 	if err != nil {
-		return err
+		c.sayError("connect", err)
+		return
 	}
 	writer := bufio.NewWriter(conn)
 	reader := bufio.NewReader(conn)
@@ -96,20 +97,20 @@ func (c *TCPClient) Start() error {
 	vf.EndTx()
 	err = Send(vf.txb, conn, writer, c.gconfig.Timeout)
 	if err != nil {
-		fmt.Println("send")
-		return err
+		c.sayError("send", err)
+		return
 	}
 
 	//прием ответа со статусом регистрации
 	bb, err := ReadPac(conn, reader, c.gconfig.Timeout)
 	if err != nil {
-		fmt.Println("readp")
-		return err
+		c.sayError("readp", err)
+		return
 	}
 	rxf := NewVikingFrameRx(bb)
 	if rxf.msgid != 0x21 {
-		fmt.Println("21")
-		return err
+		c.sayError("21", nil)
+		return
 	}
 	opts := rxf.GetOptions()
 	status := -1
@@ -119,10 +120,12 @@ func (c *TCPClient) Start() error {
 			status = is
 		}
 	} else {
-		fmt.Println("op55")
+		c.sayError("op55", nil)
+		return
 	}
 	if status < 0 {
-		return c.sayError("bad reg status", err)
+		c.sayError("bad reg status", err)
+		return
 	}
 	c.state = 2
 	TotalScore++
@@ -137,7 +140,6 @@ func (c *TCPClient) Start() error {
 	c.Close()
 	c.say("exit")
 	TotalScore--
-	return nil
 }
 
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
@@ -222,22 +224,21 @@ func (c *TCPClient) startHeartbeat() {
 
 // startReceiving запускает прием данных от сервера
 func (c *TCPClient) startReceiving() {
+	c.say("startReceiving")
+	count := 0
 	for {
+		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
+		if err != nil {
+			c.sayError("rx", err)
+			return
+		}
+		count++
+		vf := NewVikingFrameRx(bb)
+		c.say(fmt.Sprintf("%v -> msgid=0x%02X", count, vf.msgid))
+
 		// timeter := time.Now()
-		// msg, err := readMsg(c.Reader)
 		// fmt.Println("rx", time.Since(timeter).Milliseconds())
-		// if err != nil {
-		// 	c.sayError("rx", err)
-		// 	return
-		// }
-		// ioCount--
-		// switch msg.Type {
-		// case "pong":
-		// 	c.say("-> pong")
-		// default:
-		// 	c.say("=> " + msg.Type)
-		// }
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond)
 	}
 
 	// buffer := make([]byte, 4096)

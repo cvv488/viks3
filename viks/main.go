@@ -3,7 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
+
+	// "log"
 	"net"
 	"os"
 	"os/signal"
@@ -12,14 +13,23 @@ import (
 
 var timeter time.Time
 
-const SERVERID = "0000"
+const (
+	APP_INFO = "Viking Server v1.3"
+	SERVERID = "0000"
+)
 
 func main() {
-	fmt.Println("===== START Viking Server =====")
+	msg := "===== START " + APP_INFO + " ====="
+	defer say("===== STOP " + APP_INFO + " =====")
+	// fmt.Println(msg)
+	LogSetup()
+	say(msg)
+
 	// Загружаем конфигурацию и учётные данные
 	server, err := NewConnectionServer("config.json", "auth.json")
 	if err != nil {
-		log.Fatal("Ошибка инициализации сервера:", err)
+		sayError("Ошибка инициализации сервера:", err)
+		return
 	}
 
 	go func() {
@@ -27,8 +37,9 @@ func main() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt)
 		<-sigChan
-		server.logger.Println("Получен сигнал завершения, останавливаем сервер...")
+		say("Получен сигнал завершения, останавливаем сервер...")
 		server.Stop()
+		// return ?
 	}()
 
 	server.Start()
@@ -37,27 +48,27 @@ func main() {
 func (s *ConnectionServer) Start() {
 	listener, err := net.Listen("tcp", ":"+s.config.Port)
 	if err != nil {
-		s.logger.Fatal("Ошибка при запуске сервера:", err)
+		sayError("Ошибка при запуске сервера:", err)
 	}
 	defer listener.Close()
-	s.logger.Printf("Сервер запущен на порту %s", s.config.Port)
+	say("Сервер запущен на порту " + s.config.Port)
 
 	// go s.handleEvents()
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			s.logger.Println("Ошибка при принятии соединения:", err)
+			sayError("Ошибка при принятии соединения:", err)
 			continue
 		}
-		// s.logger.Printf("Новое подключение: %s", conn.RemoteAddr().String())
+		say("Новое подключение: " + conn.RemoteAddr().String())
 
 		// Проверяем лимит подключений
 		s.mutex.Lock()
 		if s.connectionCount >= s.config.MaxConnections {
 			s.mutex.Unlock()
 			conn.Close()
-			s.logger.Println("Сервер перегружен. Попробуйте позже")
+			sayError1("Сервер перегружен. Попробуйте позже")
 			continue
 		}
 		s.connectionCount++
@@ -79,29 +90,30 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	reader := bufio.NewReader(conn) //def buf 4k, writer := bufio.NewWriterSize(conn, 8192) // буфер 8 КБ
 	writer := bufio.NewWriter(conn)
 	if err := clearBufferSafe(reader, 4096); err != nil { // максимум 4 КБ мусора
-		s.logger.Printf("Слишком много мусора в буфере")
+		sayError1(err.Error())
 		return
 	}
 
-	//ждем аутентификацию
+	//ждем аутентификацию с таймаутом
 	bb, err := ReadPac(conn, reader, s.config.WaitReg)
 	if err != nil {
-		fmt.Println("не дождался пакет регистрации")
+		sayError("не дождался пакет регистрации", err)
 		return
 	}
 	vf := NewVikingFrameRx(bb)
 	if vf.msgid != 0x20 {
-		fmt.Println("не дождался пакет регистрации 20")
+		sayError1("это не пакет регистрации 0x20")
 		return
 	}
 	opts := vf.GetOptions()
 	//по полученному pointId найти его в списке разрешенных (в конфигурации)
 	op, ok := opts[0x51]
 	if ok != true {
-		fmt.Print("no opt")
+		sayError1("в пакете регистрации отсутствует pointId")
 		return
 	}
 	pointId := IHL(op.Body)
+	pids := fmt.Sprintf("%04d", pointId)
 
 	var cre *AuthCredential
 	for i, pid := range s.credentials {
@@ -111,30 +123,29 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		}
 	}
 	if cre == nil {
-		fmt.Println("нет в списке")
+		say(pids + ": отсутствует в списке конфигурации")
 		return
 	}
 	//проверить логин и пароль если есть
 	if cre.Username != "" {
 		op, ok := opts[0x56]
 		if ok != true {
-			fmt.Println("нет юзера")
+			say(pids + ": нет юзера")
 			return
 		}
 		if cre.Username != string(op.Body) {
-			fmt.Println("не верный юзер")
-			// 	s.logger.Printf("Отклонено подключение от %s: неверные учётные данные", conn.RemoteAddr().String())
+			say(pids + ": не верный юзер")
 			return
 		}
 	}
 	if cre.Password != "" {
 		op, ok := opts[0x57]
 		if ok != true {
-			fmt.Println("нет пароля")
+			say(pids + ": нет пароля")
 			return
 		}
 		if cre.Password != string(op.Body) {
-			fmt.Println("не верный пароль")
+			say(pids + ": не верный пароль")
 			return
 		}
 	}
@@ -147,47 +158,52 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	txf.EndTx()
 	err = Send(txf.txb, conn, writer, s.config.Timeout)
 	if err != nil {
-		s.logger.Println(err)
+		sayError("asend", err)
 		return
 	}
-	logger := NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 
 	client := &Client{
+		Idc:      pointId,
+		ids:      pids,
 		Conn:     conn,
 		Writer:   writer,
 		Reader:   reader,
-		Idc:      pointId,
 		LastPing: time.Now(),
-		logger:   logger,
+		// logger:   NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 	}
 	// s.register <- client
-	logger.Println("успешно аутентифицирован")
+	// say(ids + "успешно аутентифицирован")
 	client.handleClient(s)
-	logger.Println("exit")
+	// logger.Println("exit")
 }
 
 // Обрабатывает сообщения от конкретного клиента
 func (c *Client) handleClient(s *ConnectionServer) {
 	defer func() {
 		s.unregister <- c
+		c.say("exit")
 	}()
 
-	//пакет ответа на пинг // В ответ сервер передаёт клиенту пакет подтверждения, содержащий следующие опции: PointID (0x51); NetID (0x52); Статус (0x55).
+	c.say("успешно аутентифицирован")
+
+	//подготовить пакет ответа на пинг // В ответ сервер передаёт клиенту пакет подтверждения, содержащий следующие опции: PointID (0x51); NetID (0x52); Статус (0x55).
 	pif := NewVikingFrame(TS_INFO, c.Idc, 0, 0x29)
 	pif.AddOptionInt(0x51, c.Idc) //PointID
 	pif.AddOptionInt(0x52, c.Idc) //NetID
-	pif.AddOptionInt(0x55, 4)          //Статус
+	pif.AddOptionInt(0x55, 4)     //Статус
 	pif.EndTx()
 
+	count := 0
 	for {
 		bb, err := ReadPac(c.Conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
-			c.logger.Println("не дождался", err)
+			c.sayError("handleClient1", err)
 			return
 		}
-		c.logger.Println("->")
-
+		count++
 		vf := NewVikingFrameRx(bb)
+		c.say(fmt.Sprintf("%v -> msgid=0x%02X", count, vf.msgid))
+
 		switch vf.msgid {
 		// case 0x20, //запрос на регистрацию
 		// 0x21: //ответ на запрос о регистрации
@@ -198,10 +214,10 @@ func (c *Client) handleClient(s *ConnectionServer) {
 		case 0x28: //Запрос “Keep alive”
 			err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
 			if err != nil {
-				c.logger.Println(err)
+				c.sayError("send28", err)
 				return
 			}
-			c.logger.Println("<-")
+			c.say("<- pong")
 
 			// 0x29 – ответ на запрос “Keep alive”
 			// 0x30 – подписка на уведомление о подключении/отключении клиента
