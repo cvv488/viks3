@@ -4,15 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"log"
-
-	// "math/rand"
-
-	// "math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	// viks "viks"
 )
 
 const (
@@ -120,7 +115,7 @@ func (c *TCPClient) Start() {
 			status = is
 		}
 	} else {
-		c.sayError("op55", nil)
+		c.sayError("no op55", nil)
 		return
 	}
 	if status < 0 {
@@ -132,14 +127,69 @@ func (c *TCPClient) Start() {
 	c.say("Authorized")
 
 	// Запускаем периодическую отправку данных
-	go c.startHeartbeat()
+	// go c.startHeartbeat()
+	c.startHeartbeat2()
 
 	// Запускаем прием данных
-	c.startReceiving()
+	// c.startReceiving()
 
 	c.Close()
 	c.say("exit")
 	TotalScore--
+}
+
+// в цикле диалог отправки пинга и запроса статуса
+func (c *TCPClient) startHeartbeat2() {
+	//пакет для пинга
+	pif := NewVikingFrame(TS_INFO, 0, 0, 0x28)
+	pif.AddOptionInt(0x51, c.id) //PointID
+	pif.EndTx()
+
+	//пакет для запроса статуса себя же
+	stf := NewVikingFrame(TS_INFO, 0, 0, 0x22)
+	stf.AddOptionInt(0x51, c.id) //PointID
+	stf.EndTx()
+
+	for {
+		time.Sleep(time.Second * 2)
+
+		//tx-rx ping
+		if err := c.Send(pif.txb); err != nil {
+			c.sayError("send ping", err)
+			return
+		}
+		c.say("<- ping")
+		bb, err := ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
+		if err != nil {
+			c.sayError("rx ping", err)
+			return
+		}
+		vf := NewVikingFrameRx(bb)
+		if vf.msgid == 0x29 {
+			c.say("-> pong")
+		} else {
+			c.say(fmt.Sprintf("-> no pong! msgid=0x%02X", vf.msgid))
+		}
+
+		//tx-rx req status
+		if err := c.Send(stf.txb); err != nil {
+			c.sayError("send req status", err)
+			return
+		}
+		c.say("<- req status")
+		bb, err = ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
+		if err != nil {
+			c.sayError("rx req status", err)
+			return
+		}
+		vf = NewVikingFrameRx(bb)
+		if vf.msgid == 0x23 {
+			c.say("-> status")
+		} else {
+			c.say(fmt.Sprintf("-> no status! msgid=0x%02X", vf.msgid))
+		}
+
+	}
 }
 
 // startHeartbeat запускает периодическую отправку heartbeat-сообщений
@@ -160,16 +210,35 @@ func (c *TCPClient) startHeartbeat() {
 	pif.AddOptionInt(0x51, c.id) //PointID
 	pif.EndTx()
 
+	//пакет для запроса статуса себя же
+	stf := NewVikingFrame(TS_INFO, 0, 0, 0x22)
+	stf.AddOptionInt(0x51, c.id) //PointID
+	stf.EndTx()
+
 	// destCount := 2
+	stat := 0 //
 	for {
 		select {
 		case <-tickerPing.C:
-			if c.state == 2 {
+			if c.state != 2 {
+				continue
+			}
+			//попеременно тправляется пинг или инф-сообщение
+			if stat == 0 {
+				stat = 1
 				if err := c.Send(pif.txb); err != nil {
 					c.sayError("sendPing", err)
 					return
 				}
 				c.say("<- ping")
+			} else {
+				stat = 0
+				if err := c.Send(stf.txb); err != nil {
+					c.sayError("sendStatus", err)
+					return
+				}
+				c.say("<- req status")
+
 			}
 
 		case <-tickerInfo.C:
@@ -222,50 +291,72 @@ func (c *TCPClient) startHeartbeat() {
 	}
 }
 
-// startReceiving запускает прием данных от сервера
-func (c *TCPClient) startReceiving() {
-	c.say("startReceiving")
-	count := 0
-	for {
-		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
-		if err != nil {
-			c.sayError("rx", err)
-			return
-		}
-		count++
-		vf := NewVikingFrameRx(bb)
-		c.say(fmt.Sprintf("%v -> msgid=0x%02X", count, vf.msgid))
+// запускает прием данных от сервера
+// func (c *TCPClient) startReceiving() {
+// 	c.say("startReceiving")
+// 	count := 0
+// 	for {
+// 		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
+// 		if err != nil {
+// 			c.sayError("rx", err)
+// 			return
+// 		}
+// 		count++
+// 		vf := NewVikingFrameRx(bb)
+// 		c.say(fmt.Sprintf("%v -> msgid=0x%02X", count, vf.msgid))
 
-		// timeter := time.Now()
-		// fmt.Println("rx", time.Since(timeter).Milliseconds())
-		time.Sleep(time.Millisecond)
-	}
+// 		switch vf.msgid {
+// 		// case 0x20, //запрос на регистрацию
+// 		// 0x21: //ответ на запрос о регистрации
 
-	// buffer := make([]byte, 4096)
-	// for {
-	// 	n, err := c.conn.Read(buffer)
-	// 	if err != nil {
-	// 		if err == io.EOF {
-	// 			c.say("Соединение закрыто сервером")
-	// 		} else {
-	// 			c.sayError("Ошибка чтения данных", err)
-	// 		}
-	// 		c.Close()
-	// 		return
-	// 	}
-	// 	// Обрабатываем полученное сообщение
-	// 	message := string(buffer[:n])
-	// 	var msg Message
-	// 	if err := json.Unmarshal([]byte(message), &msg); err == nil {
-	// 		switch msg.Type {
-	// 		case "pong":
-	// 			c.say("-> pong")
-	// 		// case "command":
-	// 		// 	log.Printf("Получена команда: %v", msg.Data)
-	// 		// Здесь можно добавить обработку команд от сервера
-	// 		default:
-	// 			c.say("=> " + msg.Type)
-	// 		}
-	// 	}
-	// }
-}
+// 		// 0x22 – запрос статуса клиента
+// 		// 0x23 – ответ на запрос статуса клиента
+// 		// 0x24 – уведомление о подключении/отключении клиента
+// 		case 0x28: //Запрос “Keep alive”
+// 			err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
+// 			if err != nil {
+// 				c.sayError("send28", err)
+// 				return
+// 			}
+// 			c.say("<- pong")
+
+// 			// 0x29 – ответ на запрос “Keep alive”
+// 			// 0x30 – подписка на уведомление о подключении/отключении клиента
+// 			// 0x31 – ответ сервера на команду подписки
+// 			// 0x32 – запрос статуса подписки
+// 			// 0xFE – команда не поддерживается
+// 		}
+
+// 		// timeter := time.Now()
+// 		// fmt.Println("rx", time.Since(timeter).Milliseconds())
+// 		time.Sleep(time.Millisecond)
+// 	}
+
+// buffer := make([]byte, 4096)
+// for {
+// 	n, err := c.conn.Read(buffer)
+// 	if err != nil {
+// 		if err == io.EOF {
+// 			c.say("Соединение закрыто сервером")
+// 		} else {
+// 			c.sayError("Ошибка чтения данных", err)
+// 		}
+// 		c.Close()
+// 		return
+// 	}
+// 	// Обрабатываем полученное сообщение
+// 	message := string(buffer[:n])
+// 	var msg Message
+// 	if err := json.Unmarshal([]byte(message), &msg); err == nil {
+// 		switch msg.Type {
+// 		case "pong":
+// 			c.say("-> pong")
+// 		// case "command":
+// 		// 	log.Printf("Получена команда: %v", msg.Data)
+// 		// Здесь можно добавить обработку команд от сервера
+// 		default:
+// 			c.say("=> " + msg.Type)
+// 		}
+// 	}
+// }
+// }

@@ -57,10 +57,10 @@ func NewTCPClient(idx int, gconf *Config) *TCPClient {
 	}
 }
 func (c *TCPClient) say(m string) {
-	log.Println(c.id, m)
+	log.Printf("%04X %v", c.id, m)
 }
 func (c *TCPClient) sayError(m string, e error) error {
-	log.Println(c.id, "ERROR:", m, e.Error())
+	log.Printf("%04X ERROR: %v | %v", c.id, m, e)
 	return e
 }
 

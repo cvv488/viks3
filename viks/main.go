@@ -172,7 +172,6 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		// logger:   NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 	}
 	// s.register <- client
-	// say(ids + "успешно аутентифицирован")
 	client.handleClient(s)
 	// logger.Println("exit")
 }
@@ -183,15 +182,21 @@ func (c *Client) handleClient(s *ConnectionServer) {
 		s.unregister <- c
 		c.say("exit")
 	}()
-
 	c.say("успешно аутентифицирован")
 
-	//подготовить пакет ответа на пинг // В ответ сервер передаёт клиенту пакет подтверждения, содержащий следующие опции: PointID (0x51); NetID (0x52); Статус (0x55).
+	//подготовить пакет ответа на пинг
 	pif := NewVikingFrame(TS_INFO, c.Idc, 0, 0x29)
 	pif.AddOptionInt(0x51, c.Idc) //PointID
 	pif.AddOptionInt(0x52, c.Idc) //NetID
 	pif.AddOptionInt(0x55, 4)     //Статус
 	pif.EndTx()
+
+	//подготовить пакет ответа на запрос регистрации
+	sf := NewVikingFrame(TS_INFO, c.Idc, 0, 0x23)
+	sf.AddOptionInt(0x51, c.Idc) //PointID
+	sf.AddOptionInt(0x52, c.Idc) //NetID
+	sf.AddOptionInt(0x55, 4)     //Статус
+	sf.EndTx()
 
 	count := 0
 	for {
@@ -202,67 +207,38 @@ func (c *Client) handleClient(s *ConnectionServer) {
 		}
 		count++
 		vf := NewVikingFrameRx(bb)
-		c.say(fmt.Sprintf("%v -> msgid=0x%02X", count, vf.msgid))
-
+		
 		switch vf.msgid {
-		// case 0x20, //запрос на регистрацию
-		// 0x21: //ответ на запрос о регистрации
+			case 0x22: //запрос статуса клиента
+			c.say(fmt.Sprintf("%v -> req_status", count))
+			err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
+			if err != nil {
+				c.sayError("send status", err)
+				return
+			}
+			c.say("<- status")
 
-		// 0x22 – запрос статуса клиента
-		// 0x23 – ответ на запрос статуса клиента
-		// 0x24 – уведомление о подключении/отключении клиента
 		case 0x28: //Запрос “Keep alive”
+			c.say(fmt.Sprintf("%v -> ping ", count))
 			err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
 			if err != nil {
-				c.sayError("send28", err)
+				c.sayError("send pong", err)
 				return
 			}
 			c.say("<- pong")
 
+		default:
+			c.sayError1(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid))
+			// 0x20 - запрос на регистрацию
+			// 0x21 - ответ на запрос о регистрации
+			// 0x23 – ответ на запрос статуса клиента
+			// 0x24 – уведомление о подключении/отключении клиента
 			// 0x29 – ответ на запрос “Keep alive”
 			// 0x30 – подписка на уведомление о подключении/отключении клиента
 			// 0x31 – ответ сервера на команду подписки
 			// 0x32 – запрос статуса подписки
 			// 0xFE – команда не поддерживается
 		}
-
-		// opts := rxf.GetOptions()
-		// op, ok := opts[0x51]
-		// if ok != true {
-		// 	fmt.Print("no opt")
-		// 	return
-		// }
-		// pointId := IHL(op.Body)
-
-		// msg, err := readMsg(client.Reader)
-		// if err != nil {
-		// 	client.logger.Println(err)
-		// 	return
-		// }
-		// switch msg.Type {
-		// case "ping":
-		// 	client.logger.Println("-> ping")
-		// 	client.Mutex.Lock()
-		// 	client.LastPing = time.Now()
-		// 	client.Mutex.Unlock()
-
-		// 	msg.Type = "pong"
-		// 	err = sendMsg(&msg, client.Writer)
-		// 	if err != nil {
-		// 		client.logger.Println(err)
-		// 		return
-		// 	}
-
-		// case "info":
-		// client.logger.Println("-> info to",msg.Dest)
-		//todo? проверить что сообщение самому себе - не нужно транслировать
-		// time.Sleep(time.Second)
-		// client.logger.Println("-> info *")
-		// s.broadcast <- msg
-
-		// default:
-		// 	client.logger.Println("Получен:", msg.Type)
-		// }
 	}
 }
 
