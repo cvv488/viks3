@@ -2,17 +2,16 @@ package main
 
 import (
 	"bufio"
-	// "log"
 	"net"
 	"sync"
 	"time"
 )
 
 type ConnectionServer struct {
-	clients    map[string]*Client
-	register   chan *Client
-	unregister chan *Client
-	// broadcast       chan Message
+	clients         map[int]*Client //подключенные клиенты
+	register        chan *Client
+	unregister      chan *Client
+	broadcast       chan Message
 	config          *ServerConfig
 	credentials     []AuthCredential //todo to map?
 	connectionCount int
@@ -40,7 +39,7 @@ type AuthCredential struct {
 }
 
 type Client struct {
-	Idc      int
+	Id       int
 	ids      string //строка-id для лога
 	Conn     net.Conn
 	Writer   *bufio.Writer
@@ -72,16 +71,13 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 		return nil, err
 	}
 
-	// logger := NewLogger(config.LogFile, "SRVR")
-
 	return &ConnectionServer{
-		clients:    make(map[string]*Client),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		// broadcast:       make(chan Message), //[]byte),
+		clients:         make(map[int]*Client),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
+		broadcast:       make(chan Message),
 		config:          config,
 		credentials:     credentials,
 		connectionCount: 0,
-		// logger:          logger,
 	}, nil
 }

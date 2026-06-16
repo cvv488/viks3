@@ -79,3 +79,21 @@ func sayError1(msg string) {
 // 	// log.Error().Err(str)
 // 	log.Error().Msg(str)
 // }
+
+//std log
+// func NewLogger(LogFile string, prefix string) *log.Logger {
+// 	var logOutput io.Writer
+// 	if LogFile != "" {
+// 		logFile, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+// 		if err != nil {
+// 			log.Printf("Не удалось открыть файл логов: %v, используем stdout", err)
+// 			logOutput = os.Stdout
+// 		} else {
+// 			logOutput = logFile
+// 		}
+// 	} else {
+// 		logOutput = os.Stdout
+// 	}
+// 	logger := log.New(logOutput, prefix+" ", log.Ldate|log.Ltime|log.Lshortfile|log.Lmsgprefix)
+// 	return logger
+// }

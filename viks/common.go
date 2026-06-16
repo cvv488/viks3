@@ -4,8 +4,6 @@ import (
 	"bufio"
 	// "encoding/binary"
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"os"
 	"strings"
@@ -14,11 +12,11 @@ import (
 
 // Message — структура сообщения
 type Message struct {
-	Type      string `json:"type"`
-	ClientID  string `json:"client_id"`
-	Dest      string
-	Data      any       `json:"data,omitempty"`
-	Timestamp time.Time `json:"timestamp"`
+	// Type      string `json:"type"`
+	// ClientID  string `json:"client_id"`
+	Dest int
+	Data any `json:"data,omitempty"`
+	// Timestamp time.Time `json:"timestamp"`
 }
 
 // re []byteHL из Int16
@@ -32,23 +30,6 @@ func BHL(vv int) []byte {
 // re Int16 из []byteHL
 func IHL(bb []byte) int {
 	return int(bb[0])<<8 + int(bb[1])
-}
-
-func NewLogger(LogFile string, prefix string) *log.Logger {
-	var logOutput io.Writer
-	if LogFile != "" {
-		logFile, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			log.Printf("Не удалось открыть файл логов: %v, используем stdout", err)
-			logOutput = os.Stdout
-		} else {
-			logOutput = logFile
-		}
-	} else {
-		logOutput = os.Stdout
-	}
-	logger := log.New(logOutput, prefix+" ", log.Ldate|log.Ltime|log.Lshortfile|log.Lmsgprefix)
-	return logger
 }
 
 // as json5: Поддерживаются однострочные и многострочные комментарии; Записи и списки могут иметь запятую после последнего элемента
@@ -106,8 +87,53 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 	return data, nil
 }
 
+// func ReadPac(conn net.Conn, reader *bufio.Reader, timeout int) ([]byte, error) {
+// 	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(timeout) * time.Second)); err != nil {
+// 		return nil, fmt.Errorf("set read deadline failed: %w", err)
+// 	}
+// 	// Читаем 2 байта длины
+// 	lengthBuf := make([]byte, 2)
+// 	_, err := io.ReadFull(reader, lengthBuf)
+// 	if err != nil {
+// 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+// 			return nil, fmt.Errorf("read length timeout: %w", err)
+// 		}
+// 		return nil, fmt.Errorf("read length failed: %w", err)
+// 	}
+// 	length := binary.BigEndian.Uint16(lengthBuf)
+// 	if length > 65535 {
+// 		return nil, fmt.Errorf("packet too large: %d bytes", length)
+// 	}
+// 	packet := make([]byte, length)
+// 	// Первая попытка чтения тела пакета
+// 	n, err := reader.Read(packet)
+// 	if err != nil && n == 0 {
+// 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+// 			// Таймаут, но данных нет — ошибка
+// 			return nil, fmt.Errorf("read packet timeout (no data): %w", err)
+// 		}
+// 		return nil, fmt.Errorf("read packet failed: %w", err)
+// 	}
+// 	// Если прочитали не всё, дочитываем с новым таймаутом
+// 	if n < int(length) {
+// 		if err := conn.SetReadDeadline(time.Now().Add(time.Duration(timeout) * time.Second)); err != nil {
+// 			return nil, fmt.Errorf("set read deadline for retry failed: %w", err)
+// 		}
+// 		n2, err := io.ReadFull(reader, packet[n:length])
+// 		if err != nil {
+// 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+// 				return nil, fmt.Errorf("partial packet timeout: read %d/%d bytes", n, length)
+// 			}
+// 			return nil, fmt.Errorf("incomplete packet: expected %d bytes, read %d: %w", length, n+n2, err)
+// 		}
+// 	}
+// 	return packet, nil
+// }
+
+//	ReadPac вариант ок, но надо пофиксить ситуации когда пришло другое ожидаемое количество байт
+//
 // быстрый - без аллокаций и внешнего буфера
-// если указан timeoutms ждем первые 2 байта с этим таймаутом или вечно, но следующие байты всегда дочитываются с таймаутом 5с
+// если указан timeoutms ждем первые 2 байта с этим таймаутом, но следующие байты всегда дочитываются с таймаутом 5с
 // Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
 func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error) {
 	const pref = "ReadPac:"
@@ -118,7 +144,9 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 			return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
 		}
 	} else {
-		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		//бесконечный таймаут 'conn.SetReadDeadline(time.Time{})' не все реализации поддерживают
+		// if err := conn.SetReadDeadline(time.Now().Add(100 * 365 * 24 * time.Hour)); err != nil { уст на 100лет
+		if err := conn.SetReadDeadline(time.Date(3000, time.January, 1, 0, 0, 0, 0, time.UTC)); err != nil { //3000 год - без вычислений
 			return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
 		}
 	}
@@ -136,15 +164,24 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 	}
 
 	//и чтение тела пакета с дедлайном
-	length := IHL(lenb) // осталось принять lenb-2+2&crc
+	length := IHL(lenb) +2 // осталось принять lenb+2crc
 	if length < 3 {
-		return nil, fmt.Errorf("%v len=0", pref)
+		return nil, fmt.Errorf("%v bad short pac", pref)
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
 		return nil, fmt.Errorf("%v setTimeout2: %v", pref, err)
 	}
+
+	//попытка пофиксить ошибку "bufio: buffer full"
+	time.Sleep(time.Millisecond) //1мс на всякий случай
+	available := reader.Buffered()
+	if available < length {
+		fmt.Println("возможно, стоит использовать другой подход", available, length)
+	}
+
 	result, err := reader.Peek(length)
 	if err != nil {
+		//при попытке прочитать больше байт чем есть в буфере даст ошибку "bufio: buffer full"
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return nil, fmt.Errorf("%v timeout2", pref)
 		}

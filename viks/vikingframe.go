@@ -5,30 +5,23 @@ package main
 /*
 Формат сообщений
 
-LEN	2
-TPDU[5]:	TID	1		DEST_ADDR 2		SRC_ADDR 2
-MSG_BODY:	MSG_ID		OPTIONS: |Код опции (1 байт) Длинна опции (1 байт) Тело опции (от 0 до 255 байт)| ... | 0xFF Конец опций
-CRC[2]
+LEN[2] без LEN и CRC | TID | DEST_ADDR[2] | SRC_ADDR[2] | BODY | CRC[2]
+BODY_TID=0x80: | MSG_ID | OPTIONS: [Код опции, Длинна опции, Тело опции (от 0 до 255 байт)] ...  0xFF Конец опций
 
-	=> 00-2C  80 00-00-00-00  20    50  11  (54-4D-44-52-56-20-76-2E-33-2E-39-2E-31-2E-31-33-39-)	51-02-(01-01-)	56-05-(41-64-6D-69-6E-)	57-05-(61-64-6D-69-6E-)	FF-	3E-EB
-	   0  1   2  3  4  5  6   7     8
-	   Len    Id DAdr  SAdr   MsgId Opt Len  OptBody
+=> 00-2C=44 [80 00-00-00-00  20    50  11  (54-4D-44-52-56-20-76-2E-33-2E-39-2E-31-2E-31-33-39-)	51-02-(01-01-)	56-05-(41-64-6D-69-6E-)	57-05-(61-64-6D-69-6E-)	FF]	3E-EB
+	Len     TId DAdr  SAdr   MsgId Opt Len  OptBody
 
 2024-08-19 09:55:48.1511|TRACE|TcpSrv|VikingSrv [5555:0/1]  => [132] 00-80 80-00-00-00-00-
 20-запрос на регистрацию (51-PointID 02 01-96) (56-Логин 08-70-75-31-6B-70-31-35-30) (57-00 пароль)
 info 50 67 C0-CA-2D-35-30-30-20-52-54-4F-53-20-53-4E-3A-20-30-20-48-57-3A-20-31-2E-37-2E-30-20-46-57-3A-20-32-2E-35-2E-37-20-4D-4F-44-45-4D-3A-20-31-32-2E-30-30-2E-36-31-36-20-49-4D-45-49-3A-20-33-35-35-38-35-35-30-35-36-31-33-38-38-35-30-20-49-43-43-49-44-31-3A-20-38-39-37-30-31-30-32-38-33-34-38-31-30-39-36-34-39-32) FF-F7-1D
 2024-08-19 09:55:48.1511|DEBUG|TcpSrv|VikingSrv [5555:0/1]  >ReqRegister_PointID:0196 ??-500 RTOS SN: 0 HW: 1.7.0 FW: 2.5.7 MODEM: 12.00.616 IMEI: 355855056138850 ICCID1: 897010283481096492
 2024-08-19 09:55:48.1511|TRACE|TcpSrv|VikingSrv [5555:0/1]  <= [18] 00-0E-80-00-00-00-00-21-52-02-01-96-55-01-04-FF-52-F0
-
-HERCULES:
-запрос на регистрацию
-00 80 80 00 00 00 00 20 51 02 01 96 56 08 70 75 31 6B 70 31 35 30 57 00 50 67 C0 CA 2D 35 30 30 20 52 54 4F 53 20 53 4E 3A 20 30 20 48 57 3A 20 31 2E 37 2E 30 20 46 57 3A 20 32 2E 35 2E 37 20 4D 4F 44 45 4D 3A 20 31 32 2E 30 30 2E 36 31 36 20 49 4D 45 49 3A 20 33 35 35 38 35 35 30 35 36 31 33 38 38 35 30 20 49 43 43 49 44 31 3A 20 38 39 37 30 31 30 32 38 33 34 38 31 30 39 36 34 39 32 FF F7 1D
 */
 const (
 	// Тип сообщения
-	TS_SLUG = 0x80 //служебное
-	TS_INFO = 0x81 //информационное
-	TS_SPOR = 0x82 //спорадическое
+	TSLUG = 0x80 //служебное
+	TINFO = 0x81 //информационное
+	TSPOR = 0x82 //спорадическое
 
 	// MID = 0x20 //– запрос на регистрацию
 
@@ -79,15 +72,29 @@ func NewVikingFrame(typem byte, dest, src int, mid byte) *VikingFrame {
 	}
 }
 
+// завершает формирование служебного пакета: add 0xff, crc, set_Len
+func (vf *VikingFrame) EndTx() {
+	vf.txb = append(vf.txb, 0xff) //mark end opts
+	lenp := len(vf.txb) - 2       //без [LEN]
+	vf.txb[0] = byte(lenp >> 8)
+	vf.txb[1] = byte(lenp)
+	hi, lo := Crc(vf.txb)
+	vf.txb = append(vf.txb, hi)
+	vf.txb = append(vf.txb, lo)
+}
+
 //создает на основе пришедших байт
 func NewVikingFrameRx(rxb []byte) *VikingFrame {
-	return &VikingFrame{
-		tid: rxb[0],
+	vf := VikingFrame{
+		tid:     rxb[0],
 		destadr: IHL(rxb[1:]),
-		srcadr: IHL(rxb[3:]),
-		msgid: rxb[5],
-		Rxb: rxb,
+		srcadr:  IHL(rxb[3:]),
+		Rxb:     rxb,
 	}
+	if vf.tid == TSLUG {
+		vf.msgid = rxb[5]
+	}
+	return &vf
 }
 
 func (vf *VikingFrame) AddOption(code byte, vv string) {
@@ -103,16 +110,6 @@ func (vf *VikingFrame) AddOptionInt(code byte, vv int) {
 	vf.txb = append(vf.txb, BHL(vv)...)
 	// op := Option{code: code, len: 2, body: BHL(vv)}
 	// vf.options = append(vf.options, op)
-}
-
-// завершает формирование пакета: add 0xff, crc, set_Len
-func (vf *VikingFrame) EndTx() {
-	vf.txb = append(vf.txb, 0xff)      //mark end opts
-	vf.txb[0] = byte(len(vf.txb) >> 8) //len
-	vf.txb[1] = byte(len(vf.txb))
-	hi, lo := Crc(vf.txb)
-	vf.txb = append(vf.txb, hi)
-	vf.txb = append(vf.txb, lo)
 }
 
 func (vf *VikingFrame) GetOptions() map[int]Option {
@@ -131,6 +128,22 @@ func (vf *VikingFrame) GetOptions() map[int]Option {
 		pos += lenOpt + 2
 	}
 	return opts
+}
+
+//информационный пакет
+func NewVikingFrameInf(dest, src int, data []byte) *VikingFrame {
+	var txb []byte
+	txb = append(txb, BHL(len(data)+5)...) //LEN
+	txb = append(txb, TINFO)
+	txb = append(txb, BHL(dest)...)
+	txb = append(txb, BHL(src)...)
+	txb = append(txb, data...)
+	hi, lo := Crc(txb)
+	txb = append(txb, hi)
+	txb = append(txb, lo)
+	return &VikingFrame{
+		txb: txb,
+	}
 }
 
 // dd := "00-2C-80-00-00-00-00 20 50inf-11-(54-4D-44-52-56-20-76-2E-33-2E-39-2E-31-2E-31-33-39-)	51pid-02-(01-01-)	56-05-(41-64-6D-69-6E-)	57-05-(61-64-6D-69-6E-)	FF"
@@ -163,7 +176,6 @@ func Crc(bb []byte) (hi byte, lo byte) {
 	}
 	return
 }
-
 
 // func (vf *VikingFrame) Add(ii int) { //HL
 // 	vf.buffer = append(vf.buffer, byte(ii>>8))

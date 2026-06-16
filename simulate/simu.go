@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	RUNMODE = 1 //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
-	CLIENTS = 1 // [0001...1000]
+	// RUNMODE = 1 //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
+	CLIENTS = 1
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -84,7 +84,7 @@ func (c *TCPClient) Start() {
 	c.say("Connected")
 
 	//отправка запроса регистрации
-	vf := NewVikingFrame(TS_INFO, 0, 0, 0x20)
+	vf := NewVikingFrame(TSLUG, 0, 0, 0x20)
 	vf.AddOption(0x50, c.conf.Info)
 	vf.AddOptionInt(0x51, c.id)
 	vf.AddOption(0x56, c.conf.User)
@@ -99,12 +99,12 @@ func (c *TCPClient) Start() {
 	//прием ответа со статусом регистрации
 	bb, err := ReadPac(conn, reader, c.gconfig.Timeout)
 	if err != nil {
-		c.sayError("readp", err)
+		c.sayError("read status", err)
 		return
 	}
 	rxf := NewVikingFrameRx(bb)
 	if rxf.msgid != 0x21 {
-		c.sayError("21", nil)
+		c.sayError("-> no status 21", nil)
 		return
 	}
 	opts := rxf.GetOptions()
@@ -115,20 +115,23 @@ func (c *TCPClient) Start() {
 			status = is
 		}
 	} else {
-		c.sayError("no op55", nil)
+		c.sayError("-> no op55", nil)
 		return
 	}
 	if status < 0 {
-		c.sayError("bad reg status", err)
+		c.sayError("-> bad reg status", err)
 		return
 	}
 	c.state = 2
 	TotalScore++
 	c.say("Authorized")
 
-	// Запускаем периодическую отправку данных
-	// go c.startHeartbeat()
-	c.startHeartbeat2()
+	// id:1 is ПУ, остальные КП
+	if c.id == 1 {
+		c.startHeartbeatPU()
+	} else {
+		c.startHeartbeatKP()
+	}
 
 	// Запускаем прием данных
 	// c.startReceiving()
@@ -138,17 +141,58 @@ func (c *TCPClient) Start() {
 	TotalScore--
 }
 
-// в цикле диалог отправки пинга и запроса статуса
-func (c *TCPClient) startHeartbeat2() {
+// ПУ в цикле запрашивает статус и отправляет данные всем КП
+func (c *TCPClient) startHeartbeatPU() {
+	c.say("Start PU")
+	dest := 2
+	data := make([]byte, 10)
+	for {
+		time.Sleep(time.Second * 2)
+
+		//запрос статуса
+		stf := NewVikingFrame(TSLUG, 0, 0, 0x22)
+		stf.AddOptionInt(0x51, dest) //PointID
+		stf.EndTx()
+		if err := c.Send(stf.txb); err != nil {
+			c.sayError("send req status", err)
+			return
+		}
+		c.say(fmt.Sprintf("<- req status of %v ", dest))
+		bb, err := ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
+		if err != nil {
+			c.sayError("rx req status", err)
+			return
+		}
+		vf := NewVikingFrameRx(bb)
+		if vf.msgid == 0x23 {
+			c.say("-> status")
+		} else {
+			c.say(fmt.Sprintf("-> no status! msgid=0x%02X", vf.msgid))
+			continue
+		}
+
+		inf := NewVikingFrameInf(dest, 0, data)
+		if err := c.Send(inf.txb); err != nil {
+			c.sayError("send inf", err)
+			return
+		}
+		c.say(fmt.Sprintf("<= inf to %v ", dest))
+
+		// dest++
+		// if dest > CLIENTS {
+		// 	dest = 2
+		// }
+	}
+}
+
+// КП в цикле диалог пинга
+func (c *TCPClient) startHeartbeatKP() {
+	c.say("start KP")
+
 	//пакет для пинга
-	pif := NewVikingFrame(TS_INFO, 0, 0, 0x28)
+	pif := NewVikingFrame(TSLUG, 0, 0, 0x28)
 	pif.AddOptionInt(0x51, c.id) //PointID
 	pif.EndTx()
-
-	//пакет для запроса статуса себя же
-	stf := NewVikingFrame(TS_INFO, 0, 0, 0x22)
-	stf.AddOptionInt(0x51, c.id) //PointID
-	stf.EndTx()
 
 	for {
 		time.Sleep(time.Second * 2)
@@ -170,29 +214,9 @@ func (c *TCPClient) startHeartbeat2() {
 		} else {
 			c.say(fmt.Sprintf("-> no pong! msgid=0x%02X", vf.msgid))
 		}
-
-		//tx-rx req status
-		if err := c.Send(stf.txb); err != nil {
-			c.sayError("send req status", err)
-			return
-		}
-		c.say("<- req status")
-		bb, err = ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
-		if err != nil {
-			c.sayError("rx req status", err)
-			return
-		}
-		vf = NewVikingFrameRx(bb)
-		if vf.msgid == 0x23 {
-			c.say("-> status")
-		} else {
-			c.say(fmt.Sprintf("-> no status! msgid=0x%02X", vf.msgid))
-		}
-
 	}
 }
 
-// startHeartbeat запускает периодическую отправку heartbeat-сообщений
 func (c *TCPClient) startHeartbeat() {
 	tickerPing := time.NewTicker(time.Duration(c.gconfig.PingInterval) * time.Second)
 	tickerInfo := time.NewTicker(100 * time.Millisecond)
@@ -206,12 +230,12 @@ func (c *TCPClient) startHeartbeat() {
 	}()
 
 	//пакет для пинга
-	pif := NewVikingFrame(TS_INFO, 0, 0, 0x28)
+	pif := NewVikingFrame(TSLUG, 0, 0, 0x28)
 	pif.AddOptionInt(0x51, c.id) //PointID
 	pif.EndTx()
 
 	//пакет для запроса статуса себя же
-	stf := NewVikingFrame(TS_INFO, 0, 0, 0x22)
+	stf := NewVikingFrame(TSLUG, 0, 0, 0x22)
 	stf.AddOptionInt(0x51, c.id) //PointID
 	stf.EndTx()
 

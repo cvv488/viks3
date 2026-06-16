@@ -14,8 +14,8 @@ import (
 var timeter time.Time
 
 const (
-	APP_INFO = "Viking Server v1.3"
-	SERVERID = "0000"
+	APP_INFO = "Viking Server v1.4"
+	// SERVERID = "0000"
 )
 
 func main() {
@@ -53,7 +53,7 @@ func (s *ConnectionServer) Start() {
 	defer listener.Close()
 	say("Сервер запущен на порту " + s.config.Port)
 
-	// go s.handleEvents()
+	go s.handleEvents()
 
 	for {
 		conn, err := listener.Accept()
@@ -128,33 +128,33 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 	//проверить логин и пароль если есть
 	if cre.Username != "" {
-		op, ok := opts[0x56]
-		if ok != true {
+		if op, ok := opts[0x56]; ok != true {
 			say(pids + ": нет юзера")
 			return
-		}
-		if cre.Username != string(op.Body) {
-			say(pids + ": не верный юзер")
-			return
+		} else {
+			if cre.Username != string(op.Body) {
+				say(pids + ": не верный юзер")
+				return
+			}
 		}
 	}
 	if cre.Password != "" {
-		op, ok := opts[0x57]
-		if ok != true {
+		if op, ok := opts[0x57]; ok != true {
 			say(pids + ": нет пароля")
 			return
-		}
-		if cre.Password != string(op.Body) {
-			say(pids + ": не верный пароль")
-			return
+		} else {
+			if cre.Password != string(op.Body) {
+				say(pids + ": не верный пароль")
+				return
+			}
 		}
 	}
 	//todo7 если такой уже есть отключить оба!
 
 	// Успешная аутентификация - ответить клиенту
-	txf := NewVikingFrame(TS_INFO, pointId, 0, 0x21) //todo уточнить destAdr=pointId ?
-	txf.AddOptionInt(0x52, pointId)                  //NetID
-	txf.AddOptionInt(0x55, 4)                        //Статус
+	txf := NewVikingFrame(TSLUG, 0, 0, 0x21)
+	txf.AddOptionInt(0x52, pointId) //NetID
+	txf.AddOptionInt(0x55, 4)       //Статус
 	txf.EndTx()
 	err = Send(txf.txb, conn, writer, s.config.Timeout)
 	if err != nil {
@@ -163,7 +163,7 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 
 	client := &Client{
-		Idc:      pointId,
+		Id:       pointId,
 		ids:      pids,
 		Conn:     conn,
 		Writer:   writer,
@@ -171,13 +171,13 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		LastPing: time.Now(),
 		// logger:   NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 	}
-	// s.register <- client
+	s.register <- client
 	client.handleClient(s)
-	// logger.Println("exit")
 }
 
 // Обрабатывает сообщения от конкретного клиента
 func (c *Client) handleClient(s *ConnectionServer) {
+	pref := "handleClient: "
 	defer func() {
 		s.unregister <- c
 		c.say("exit")
@@ -185,119 +185,128 @@ func (c *Client) handleClient(s *ConnectionServer) {
 	c.say("успешно аутентифицирован")
 
 	//подготовить пакет ответа на пинг
-	pif := NewVikingFrame(TS_INFO, c.Idc, 0, 0x29)
-	pif.AddOptionInt(0x51, c.Idc) //PointID
-	pif.AddOptionInt(0x52, c.Idc) //NetID
-	pif.AddOptionInt(0x55, 4)     //Статус
+	pif := NewVikingFrame(TSLUG, c.Id, 0, 0x29)
+	pif.AddOptionInt(0x51, c.Id) //PointID
+	pif.AddOptionInt(0x52, c.Id) //NetID
+	pif.AddOptionInt(0x55, 4)    //Статус
 	pif.EndTx()
-
-	//подготовить пакет ответа на запрос регистрации
-	sf := NewVikingFrame(TS_INFO, c.Idc, 0, 0x23)
-	sf.AddOptionInt(0x51, c.Idc) //PointID
-	sf.AddOptionInt(0x52, c.Idc) //NetID
-	sf.AddOptionInt(0x55, 4)     //Статус
-	sf.EndTx()
 
 	count := 0
 	for {
 		bb, err := ReadPac(c.Conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
-			c.sayError("handleClient1", err)
-			return
+			c.sayError(pref, err)
+			continue //return
 		}
 		count++
 		vf := NewVikingFrameRx(bb)
-		
-		switch vf.msgid {
+		switch vf.tid {
+		case TSLUG:
+			switch vf.msgid {
 			case 0x22: //запрос статуса клиента
-			c.say(fmt.Sprintf("%v -> req_status", count))
-			err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
-			if err != nil {
-				c.sayError("send status", err)
-				return
-			}
-			c.say("<- status")
+				opts := vf.GetOptions()
+				op, ok := opts[0x51]
+				if ok != true {
+					sayError1(pref + "-> req_status no pointId")
+					return
+				}
+				pointId := IHL(op.Body)
+				c.say(fmt.Sprintf("-> req_status of %v", pointId))
 
-		case 0x28: //Запрос “Keep alive”
-			c.say(fmt.Sprintf("%v -> ping ", count))
-			err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
-			if err != nil {
-				c.sayError("send pong", err)
-				return
+				sf := NewVikingFrame(TSLUG, 0, 0, 0x23)
+				sf.AddOptionInt(0x51, pointId) //PointID
+				sf.AddOptionInt(0x52, pointId) //NetID
+				mm := ""
+				if _, ok := s.clients[pointId]; ok == true {
+					sf.AddOptionInt(0x55, 4)
+					mm = "on"
+				} else {
+					sf.AddOptionInt(0x55, 2) //отключен
+					mm = "off"
+				}
+				sf.EndTx()
+				err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
+				if err != nil {
+					c.sayError("send status", err)
+					return
+				}
+				c.say(fmt.Sprintf("<- status of %v is %v", pointId, mm))
+
+			case 0x28: //Запрос “Keep alive”
+				c.say(fmt.Sprintf("%v -> ping ", count))
+				err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
+				if err != nil {
+					c.sayError("send pong", err)
+					return
+				}
+				c.say("<- pong")
+
+			default:
+				c.sayError1(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid))
+				// 0x20 - запрос на регистрацию
+				// 0x21 - ответ на запрос о регистрации
+				// 0x23 – ответ на запрос статуса клиента
+				// 0x24 – уведомление о подключении/отключении клиента
+				// 0x29 – ответ на запрос “Keep alive”
+				// 0x30 – подписка на уведомление о подключении/отключении клиента
+				// 0x31 – ответ сервера на команду подписки
+				// 0x32 – запрос статуса подписки
+				// 0xFE – команда не поддерживается
 			}
-			c.say("<- pong")
+		case TINFO:
+			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
+
+		case TSPOR:
+			c.say(fmt.Sprintf("==> spor to %v", vf.destadr))
 
 		default:
-			c.sayError1(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid))
-			// 0x20 - запрос на регистрацию
-			// 0x21 - ответ на запрос о регистрации
-			// 0x23 – ответ на запрос статуса клиента
-			// 0x24 – уведомление о подключении/отключении клиента
-			// 0x29 – ответ на запрос “Keep alive”
-			// 0x30 – подписка на уведомление о подключении/отключении клиента
-			// 0x31 – ответ сервера на команду подписки
-			// 0x32 – запрос статуса подписки
-			// 0xFE – команда не поддерживается
+			c.sayError1(fmt.Sprintf("~~> unknown tid=%v", vf.tid))
 		}
 	}
 }
 
 // Обрабатывает события регистрации/удаления клиентов и рассылку сообщений
-// func (s *ConnectionServer) handleEvents() {
-// 	for {
-// 		select {
-// 		case client := <-s.register:
-// 			s.mutex.Lock()
-// 			s.clients[client.Idc] = client
-// 			s.mutex.Unlock()
-// 			///client.logger.Printf("Registered, links: %d", len(s.clients))
+func (s *ConnectionServer) handleEvents() {
+	for {
+		select {
+		case client := <-s.register:
+			s.mutex.Lock()
+			s.clients[client.Id] = client
+			s.mutex.Unlock()
+			///client.logger.Printf("Registered, links: %d", len(s.clients))
 
-// 		case client := <-s.unregister:
-// 			s.mutex.Lock()
-// 			if _, ok := s.clients[client.Idc]; ok {
-// 				delete(s.clients, client.Idc)
-// 				client.Conn.Close()
-// 			}
-// 			s.mutex.Unlock()
-// 			///client.logger.Printf("Unregistered, links: %d", len(s.clients))
+		case client := <-s.unregister:
+			s.mutex.Lock()
+			if _, ok := s.clients[client.Id]; ok {
+				delete(s.clients, client.Id)
+				client.Conn.Close()
+			}
+			s.mutex.Unlock()
+			///client.logger.Printf("Unregistered, links: %d", len(s.clients))
 
-// 		case message := <-s.broadcast:
-// 			// find := false
-// 			s.mutex.RLock()
-// 			// fmt.Println(message.Dest)
-// 			if cli, ok := s.clients[message.Dest]; ok == true {
-// 				timeter = time.Now()
-// 				err := sendMsg(&message, cli.Writer)
-// 				fmt.Println(message.ClientID, "->", message.Dest, time.Since(timeter).Microseconds())
-// 				if err != nil {
-// 					// Если ошибка записи, помечаем клиента к удалению
-// 					s.unregister <- cli
-// 					cli.logger.Println(err)
-// 				}
-// 			} else {
-// 				s.logger.Printf("Bad Dest %s", message.Dest)
-// 			}
-
-// 			// for client := range s.clients { //todo map[]
-// 			// 	if message.Dest == client.Idc {
-// 			// 		fmt.Println(time.Since(timeter).Microseconds())
-// 			// 		err := sendMsg(&message, client.Writer)
-// 			// 		if err != nil {
-// 			// 			// Если ошибка записи, помечаем клиента к удалению
-// 			// 			s.unregister <- client
-// 			// 			client.logger.Println(err)
-// 			// 		}
-// 			// 		find = true
-// 			// 		break
-// 			// 	}
-// 			// }
-// 			s.mutex.RUnlock()
-// 			// if !find {
-// 			// 	s.logger.Printf("Bad Dest %s", message.Dest)
-// 			// }
-// 		}
-// 	}
-// }
+		case message := <-s.broadcast:
+			// find := false
+			s.mutex.RLock()
+			// fmt.Println(message.Dest)
+			if cli, ok := s.clients[message.Dest]; ok == true {
+				// timeter = time.Now()
+				// err := sendMsg(&message, cli.Writer)
+				// fmt.Println(message.ClientID, "->", message.Dest, time.Since(timeter).Microseconds())
+				// if err != nil {
+				// Если ошибка записи, помечаем клиента к удалению
+				s.unregister <- cli
+				// cli.logger.Println(err)
+			}
+			// } else {
+			// 	s.logger.Printf("Bad Dest %s", message.Dest)
+			// }
+			s.mutex.RUnlock()
+			// if !find {
+			// 	s.logger.Printf("Bad Dest %s", message.Dest)
+			// }
+		}
+	}
+}
 
 // Останавливает сервер
 func (s *ConnectionServer) Stop() {
@@ -309,5 +318,5 @@ func (s *ConnectionServer) Stop() {
 	for _, value := range s.clients {
 		value.Conn.Close()
 	}
-	s.clients = make(map[string]*Client)
+	s.clients = make(map[int]*Client) //clr
 }

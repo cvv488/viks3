@@ -26,9 +26,9 @@ type ClientConfig struct {
 
 // TCPClient — структура TCP-клиента
 type TCPClient struct {
+	id      int
 	gconfig *Config
 	conf    *ClientConfig
-	id      int
 	state   int //1-connected, 2-authorized, 9-closed
 	conn    net.Conn
 	Writer  *bufio.Writer
