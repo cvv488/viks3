@@ -45,15 +45,15 @@ func main() {
 	server.Start()
 }
 
-func (s *ConnectionServer) Start() {
-	listener, err := net.Listen("tcp", ":"+s.config.Port)
+func (srv *ConnectionServer) Start() {
+	listener, err := net.Listen("tcp", ":"+srv.config.Port)
 	if err != nil {
 		sayError("Ошибка при запуске сервера:", err)
 	}
 	defer listener.Close()
-	say("Сервер запущен на порту " + s.config.Port)
+	say("Сервер запущен на порту " + srv.config.Port)
 
-	go s.handleEvents()
+	go srv.handleEvents()
 
 	for {
 		conn, err := listener.Accept()
@@ -64,26 +64,26 @@ func (s *ConnectionServer) Start() {
 		say("Новое подключение: " + conn.RemoteAddr().String())
 
 		// Проверяем лимит подключений
-		s.mutex.Lock()
-		if s.connectionCount >= s.config.MaxConnections {
-			s.mutex.Unlock()
+		srv.mutex.Lock()
+		if srv.connectionCount >= srv.config.MaxConnections {
+			srv.mutex.Unlock()
 			conn.Close()
 			sayError1("Сервер перегружен. Попробуйте позже")
 			continue
 		}
-		s.connectionCount++
-		s.mutex.Unlock()
+		srv.connectionCount++
+		srv.mutex.Unlock()
 
-		go s.authenticateClient(conn)
+		go srv.authenticateClient(conn)
 	}
 }
 
 // Аутентифицирует клиента перед регистрацией
-func (s *ConnectionServer) authenticateClient(conn net.Conn) {
+func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	defer func() {
-		s.mutex.Lock()
-		s.connectionCount--
-		s.mutex.Unlock()
+		srv.mutex.Lock()
+		srv.connectionCount--
+		srv.mutex.Unlock()
 		conn.Close()
 	}()
 
@@ -95,7 +95,7 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 
 	//ждем аутентификацию с таймаутом
-	bb, err := ReadPac(conn, reader, s.config.WaitReg)
+	bb, err := ReadPac(conn, reader, srv.config.WaitReg)
 	if err != nil {
 		sayError("не дождался пакет регистрации", err)
 		return
@@ -116,9 +116,9 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	pids := fmt.Sprintf("%04d", pointId)
 
 	var cre *AuthCredential
-	for i, pid := range s.credentials {
+	for i, pid := range srv.credentials {
 		if pid.Id == pointId { //есть в списке
-			cre = &s.credentials[i]
+			cre = &srv.credentials[i]
 			break
 		}
 	}
@@ -156,7 +156,7 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 	txf.AddOptionInt(0x52, pointId) //NetID
 	txf.AddOptionInt(0x55, 4)       //Статус
 	txf.EndTx()
-	err = Send(txf.txb, conn, writer, s.config.Timeout)
+	err = Send(txf.txb, conn, writer, srv.config.Timeout)
 	if err != nil {
 		sayError("asend", err)
 		return
@@ -171,8 +171,8 @@ func (s *ConnectionServer) authenticateClient(conn net.Conn) {
 		LastPing: time.Now(),
 		// logger:   NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 	}
-	s.register <- client
-	client.handleClient(s)
+	srv.register <- client
+	client.handleClient(srv)
 }
 
 // Обрабатывает сообщения от конкретного клиента
@@ -196,7 +196,8 @@ func (c *Client) handleClient(s *ConnectionServer) {
 		bb, err := ReadPac(c.Conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
 			c.sayError(pref, err)
-			continue //return
+			// continue //
+			return
 		}
 		count++
 		vf := NewVikingFrameRx(bb)
@@ -254,7 +255,10 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				// 0xFE – команда не поддерживается
 			}
 		case TINFO:
+			//информационный пакет отправить по назначению
 			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
+			bm := BroadMessage{Dest: vf.destadr, Data: bb} // bb is vf.Rxb
+			s.broadcast <- bm
 
 		case TSPOR:
 			c.say(fmt.Sprintf("==> spor to %v", vf.destadr))
@@ -266,57 +270,64 @@ func (c *Client) handleClient(s *ConnectionServer) {
 }
 
 // Обрабатывает события регистрации/удаления клиентов и рассылку сообщений
-func (s *ConnectionServer) handleEvents() {
+func (srv *ConnectionServer) handleEvents() {
 	for {
 		select {
-		case client := <-s.register:
-			s.mutex.Lock()
-			s.clients[client.Id] = client
-			s.mutex.Unlock()
-			///client.logger.Printf("Registered, links: %d", len(s.clients))
+		case client := <-srv.register:
+			srv.mutex.Lock()
+			srv.clients[client.Id] = client
+			srv.mutex.Unlock()
+			say(fmt.Sprintf("Registered %v, links: %d", client.Id, len(srv.clients)))
 
-		case client := <-s.unregister:
-			s.mutex.Lock()
-			if _, ok := s.clients[client.Id]; ok {
-				delete(s.clients, client.Id)
+		case client := <-srv.unregister:
+			srv.mutex.Lock()
+			if _, ok := srv.clients[client.Id]; ok {
+				delete(srv.clients, client.Id)
 				client.Conn.Close()
 			}
-			s.mutex.Unlock()
-			///client.logger.Printf("Unregistered, links: %d", len(s.clients))
+			srv.mutex.Unlock()
+			say(fmt.Sprintf("Unregistered %v, links: %d", client.Id, len(srv.clients)))
 
-		case message := <-s.broadcast:
-			// find := false
-			s.mutex.RLock()
-			// fmt.Println(message.Dest)
-			if cli, ok := s.clients[message.Dest]; ok == true {
-				// timeter = time.Now()
-				// err := sendMsg(&message, cli.Writer)
-				// fmt.Println(message.ClientID, "->", message.Dest, time.Since(timeter).Microseconds())
-				// if err != nil {
-				// Если ошибка записи, помечаем клиента к удалению
-				s.unregister <- cli
-				// cli.logger.Println(err)
+		case message := <-srv.broadcast:
+			var cli *Client
+			var ok bool
+			srv.mutex.RLock()
+			if cli, ok = srv.clients[message.Dest]; ok == true { //клиент Dest есть
+			} else {
+				say(fmt.Sprintf("Bad Dest %v", message.Dest))
 			}
-			// } else {
-			// 	s.logger.Printf("Bad Dest %s", message.Dest)
-			// }
-			s.mutex.RUnlock()
-			// if !find {
-			// 	s.logger.Printf("Bad Dest %s", message.Dest)
-			// }
+			srv.mutex.RUnlock()
+			if ok {
+				//восстановить поле LEN в отправку, crc должен совпасть
+				lenb := BHL(len(message.Data)-2) 
+				err := SendFirst(lenb, cli.Writer)
+				if err != nil {
+					cli.sayError("send inf first", err)
+					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
+					return
+				}
+
+				err = Send(message.Data, cli.Conn, cli.Writer, srv.config.Timeout)
+				if err != nil {
+					cli.sayError("send inf", err)
+					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
+					return
+				}
+				cli.say("<- INF")
+			}
 		}
 	}
 }
 
 // Останавливает сервер
-func (s *ConnectionServer) Stop() {
-	s.keepAliveTicker.Stop()
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+func (srv *ConnectionServer) Stop() {
+	srv.keepAliveTicker.Stop()
+	srv.mutex.Lock()
+	defer srv.mutex.Unlock()
 
 	// Отключаем всех клиентов
-	for _, value := range s.clients {
+	for _, value := range srv.clients {
 		value.Conn.Close()
 	}
-	s.clients = make(map[int]*Client) //clr
+	srv.clients = make(map[int]*Client) //clr
 }

@@ -10,15 +10,6 @@ import (
 	"time"
 )
 
-// Message — структура сообщения
-type Message struct {
-	// Type      string `json:"type"`
-	// ClientID  string `json:"client_id"`
-	Dest int
-	Data any `json:"data,omitempty"`
-	// Timestamp time.Time `json:"timestamp"`
-}
-
 // re []byteHL из Int16
 func BHL(vv int) []byte {
 	bb := make([]byte, 2)
@@ -130,11 +121,11 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 // 	return packet, nil
 // }
 
-//	ReadPac вариант ок, но надо пофиксить ситуации когда пришло другое ожидаемое количество байт
-//
+// возвращает тело пакета без LEN[2]
 // быстрый - без аллокаций и внешнего буфера
 // если указан timeoutms ждем первые 2 байта с этим таймаутом, но следующие байты всегда дочитываются с таймаутом 5с
 // Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
+// TODO пофиксить ситуации когда пришло не ожидаемое количество байт
 func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error) {
 	const pref = "ReadPac:"
 	//установка или сброс тамаута
@@ -172,11 +163,13 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 		return nil, fmt.Errorf("%v setTimeout2: %v", pref, err)
 	}
 
-	//попытка пофиксить ошибку "bufio: buffer full"
+	//TODO попытка пофиксить если пришло не ожидаемое количество байт - ошибка "bufio: buffer full"
 	time.Sleep(time.Millisecond) //1мс на всякий случай
 	available := reader.Buffered()
 	if available < length {
-		fmt.Println("возможно, стоит использовать другой подход", available, length)
+		reader.Discard(available)
+		return nil, fmt.Errorf("available:%v < length:%v", available, length)
+		// возможно, стоит использовать другой подход
 	}
 
 	result, err := reader.Peek(length)
@@ -191,7 +184,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("%v discard2: %v", pref, err)
 	}
-	return result, nil //возвращает тело пакета без len[2]
+	return result, nil
 }
 
 func Send(bb []byte, conn net.Conn, writer *bufio.Writer, timeoutms int) error {
@@ -206,6 +199,15 @@ func Send(bb []byte, conn net.Conn, writer *bufio.Writer, timeoutms int) error {
 		} else {
 			return fmt.Errorf("Send_flush: %v", err)
 		}
+	}
+	return nil
+}
+
+// только помещает в буфер для последующей отправки (для поля LEN)
+func SendFirst(bb []byte, writer *bufio.Writer) error {
+	_, err := writer.Write(bb)
+	if err != nil {
+		return fmt.Errorf("SendFirst_write: %v", err)
 	}
 	return nil
 }

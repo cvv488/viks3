@@ -12,7 +12,7 @@ import (
 
 const (
 	// RUNMODE = 1 //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
-	CLIENTS = 1
+	CLIENTS = 2
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -147,9 +147,9 @@ func (c *TCPClient) startHeartbeatPU() {
 	dest := 2
 	data := make([]byte, 10)
 	for {
-		time.Sleep(time.Second * 2)
+		time.Sleep(time.Millisecond * 200)
 
-		//запрос статуса
+		//отправка запроса статуса
 		stf := NewVikingFrame(TSLUG, 0, 0, 0x22)
 		stf.AddOptionInt(0x51, dest) //PointID
 		stf.EndTx()
@@ -158,6 +158,7 @@ func (c *TCPClient) startHeartbeatPU() {
 			return
 		}
 		c.say(fmt.Sprintf("<- req status of %v ", dest))
+		//прием статуса
 		bb, err := ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
 		if err != nil {
 			c.sayError("rx req status", err)
@@ -168,9 +169,9 @@ func (c *TCPClient) startHeartbeatPU() {
 			c.say("-> status")
 		} else {
 			c.say(fmt.Sprintf("-> no status! msgid=0x%02X", vf.msgid))
-			continue
 		}
 
+		//отправка инф-пакета
 		inf := NewVikingFrameInf(dest, 0, data)
 		if err := c.Send(inf.txb); err != nil {
 			c.sayError("send inf", err)
@@ -187,32 +188,51 @@ func (c *TCPClient) startHeartbeatPU() {
 
 // КП в цикле диалог пинга
 func (c *TCPClient) startHeartbeatKP() {
-	c.say("start KP")
-
+	c.say("Start KP")
+	go c.ReadKP()
 	//пакет для пинга
 	pif := NewVikingFrame(TSLUG, 0, 0, 0x28)
 	pif.AddOptionInt(0x51, c.id) //PointID
 	pif.EndTx()
 
 	for {
-		time.Sleep(time.Second * 2)
-
-		//tx-rx ping
 		if err := c.Send(pif.txb); err != nil {
 			c.sayError("send ping", err)
 			return
 		}
 		c.say("<- ping")
-		bb, err := ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
+
+		time.Sleep(time.Millisecond * 300)
+	}
+}
+
+func (c *TCPClient) ReadKP() {
+	pref := "ReadKP"
+	for {
+		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
-			c.sayError("rx ping", err)
+			c.sayError(pref, err)
 			return
 		}
 		vf := NewVikingFrameRx(bb)
-		if vf.msgid == 0x29 {
-			c.say("-> pong")
-		} else {
-			c.say(fmt.Sprintf("-> no pong! msgid=0x%02X", vf.msgid))
+		switch vf.tid {
+		case TSLUG:
+			switch vf.msgid {
+			case 0x23: //ответ на запрос статуса клиента 0x22: //запрос статуса клиента
+				c.say("-> status")
+			case 0x29:
+				c.say("-> pong")
+			default:
+				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid), nil)
+			}
+		case TINFO:
+			c.say("-> INF")
+
+		case TSPOR:
+			c.say("-> SPOR")
+
+		default:
+			c.sayError(fmt.Sprintf("~~> unknown tid=%v", vf.tid), nil)
 		}
 	}
 }
