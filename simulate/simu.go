@@ -84,11 +84,11 @@ func (c *TCPClient) Start() {
 	c.say("Connected")
 
 	//отправка запроса регистрации
-	vf := NewVikingFrame(TSLUG, 0, 0, 0x20)
-	vf.AddOption(0x50, c.conf.Info)
-	vf.AddOptionInt(0x51, c.id)
-	vf.AddOption(0x56, c.conf.User)
-	vf.AddOption(0x57, c.conf.Passw)
+	vf := NewVikingFrame(TSLUG, 0, 0, MID_QREG)
+	vf.AddOption(OPT_INF, c.conf.Info)
+	vf.AddOptionInt(OPT_PID, c.id)
+	vf.AddOption(OPT_USER, c.conf.User)
+	vf.AddOption(OPT_PASW, c.conf.Passw)
 	vf.EndTx()
 	err = Send(vf.txb, conn, writer, c.gconfig.Timeout)
 	if err != nil {
@@ -103,13 +103,13 @@ func (c *TCPClient) Start() {
 		return
 	}
 	rxf := NewVikingFrameRx(bb)
-	if rxf.msgid != 0x21 {
-		c.sayError("-> no status 21", nil)
+	if rxf.msgid != MID_AREG {
+		c.sayError("-> no status21", nil)
 		return
 	}
 	opts := rxf.GetOptions()
 	status := -1
-	if op, ok := opts[0x55]; ok == true {
+	if op, ok := opts[OPT_STAT]; ok == true {
 		is := IHL(op.Body)
 		if is == 4 || is == 3 || is == 1 {
 			status = is
@@ -145,13 +145,13 @@ func (c *TCPClient) Start() {
 func (c *TCPClient) startHeartbeatPU() {
 	c.say("Start PU")
 	dest := 2
-	data := make([]byte, 10)
+	data := make([]byte, 1024)
 	for {
-		time.Sleep(time.Millisecond * 200)
+		time.Sleep(time.Millisecond * 1000)
 
 		//отправка запроса статуса
-		stf := NewVikingFrame(TSLUG, 0, 0, 0x22)
-		stf.AddOptionInt(0x51, dest) //PointID
+		stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+		stf.AddOptionInt(OPT_PID, dest) //PointID
 		stf.EndTx()
 		if err := c.Send(stf.txb); err != nil {
 			c.sayError("send req status", err)
@@ -165,19 +165,19 @@ func (c *TCPClient) startHeartbeatPU() {
 			return
 		}
 		vf := NewVikingFrameRx(bb)
-		if vf.msgid == 0x23 {
+		if vf.msgid == MID_ASTAT {
 			c.say("-> status")
 		} else {
-			c.say(fmt.Sprintf("-> no status! msgid=0x%02X", vf.msgid))
+			c.say(fmt.Sprintf("-> no status msgid=0x%02X", vf.msgid))
 		}
 
 		//отправка инф-пакета
-		inf := NewVikingFrameInf(dest, 0, data)
+		inf := NewVikingFrameInf(dest, c.id, data)
 		if err := c.Send(inf.txb); err != nil {
 			c.sayError("send inf", err)
 			return
 		}
-		c.say(fmt.Sprintf("<= inf to %v ", dest))
+		c.say(fmt.Sprintf("<= INF to %v ", dest))
 
 		// dest++
 		// if dest > CLIENTS {
@@ -191,8 +191,8 @@ func (c *TCPClient) startHeartbeatKP() {
 	c.say("Start KP")
 	go c.ReadKP()
 	//пакет для пинга
-	pif := NewVikingFrame(TSLUG, 0, 0, 0x28)
-	pif.AddOptionInt(0x51, c.id) //PointID
+	pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+	pif.AddOptionInt(OPT_PID, c.id) //PointID
 	pif.EndTx()
 
 	for {
@@ -202,7 +202,7 @@ func (c *TCPClient) startHeartbeatKP() {
 		}
 		c.say("<- ping")
 
-		time.Sleep(time.Millisecond * 300)
+		time.Sleep(time.Millisecond * 30000)
 	}
 }
 
@@ -214,25 +214,32 @@ func (c *TCPClient) ReadKP() {
 			c.sayError(pref, err)
 			return
 		}
-		vf := NewVikingFrameRx(bb)
-		switch vf.tid {
+		rxf := NewVikingFrameRx(bb)
+		switch rxf.tid {
 		case TSLUG:
-			switch vf.msgid {
-			case 0x23: //ответ на запрос статуса клиента 0x22: //запрос статуса клиента
+			switch rxf.msgid {
+			case MID_ASTAT: //ответ на запрос статуса клиента 0x22: //запрос статуса клиента
 				c.say("-> status")
-			case 0x29:
+			case MID_PONG:
 				c.say("-> pong")
 			default:
-				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid), nil)
+				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", rxf.msgid), nil)
 			}
 		case TINFO:
-			c.say("-> INF")
+			c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
+			//ответить на инф-пакет отправителю
+			inf := NewVikingFrameInf(rxf.srcadr, c.id, rxf.body)
+			if err := c.Send(inf.txb); err != nil {
+				c.sayError("send inf", err)
+				return
+			}
+			c.say(fmt.Sprintf("<= INF to %v ", rxf.srcadr))
 
 		case TSPOR:
 			c.say("-> SPOR")
 
 		default:
-			c.sayError(fmt.Sprintf("~~> unknown tid=%v", vf.tid), nil)
+			c.sayError(fmt.Sprintf("~~> unknown tid=%v", rxf.tid), nil)
 		}
 	}
 }
@@ -250,13 +257,13 @@ func (c *TCPClient) startHeartbeat() {
 	}()
 
 	//пакет для пинга
-	pif := NewVikingFrame(TSLUG, 0, 0, 0x28)
-	pif.AddOptionInt(0x51, c.id) //PointID
+	pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+	pif.AddOptionInt(OPT_PID, c.id) //PointID
 	pif.EndTx()
 
 	//пакет для запроса статуса себя же
-	stf := NewVikingFrame(TSLUG, 0, 0, 0x22)
-	stf.AddOptionInt(0x51, c.id) //PointID
+	stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+	stf.AddOptionInt(OPT_PID, c.id) //PointID
 	stf.EndTx()
 
 	// destCount := 2

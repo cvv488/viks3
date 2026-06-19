@@ -193,6 +193,7 @@ func Send(bb []byte, conn net.Conn, writer *bufio.Writer, timeoutms int) error {
 	if err != nil {
 		return fmt.Errorf("Send_write: %v", err)
 	}
+	// fmt.Printf("Буфер содержит %d байт перед Flush()", writer.Buffered())
 	if err = writer.Flush(); err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return fmt.Errorf("Send_flush: timeout")

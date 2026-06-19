@@ -1,7 +1,5 @@
 package main
 
-//VER 2
-
 /*
 Формат сообщений
 
@@ -23,34 +21,46 @@ const (
 	TINFO = 0x81 //информационное
 	TSPOR = 0x82 //спорадическое
 
-	// MID = 0x20 //– запрос на регистрацию
+	//MSG_ID
+	MID_QREG  = 0x20 //запрос на регистрацию
+	MID_AREG  = 0x21 //ответ на запрос о регистрации
+	MID_QSTAT = 0x22 //запрос статуса клиента
+	MID_ASTAT = 0x23 //ответ на запрос статуса клиента
+	MID_PING  = 0x28 //запрос “Keep alive”
+	MID_PONG  = 0x29 //ответ на запрос “Keep alive”
+	// 0x24 – уведомление о подключении/отключении клиента
+	// 0x30 – подписка на уведомление о подключении/отключении клиента
+	// 0x31 – ответ сервера на команду подписки
+	// 0x32 – запрос статуса подписки
+	// 0xFE – команда не поддерживается
 
-	OP_INF   = 0x50 //Информация о клиенте
-	OP_PID   = 0x51 //Идентификатор клиента (PointID)
-	OP_NETID = 0x52 //Сетевой идентификатор клиента (NetID)
+	//OPTIONS
+	OPT_INF   = 0x50 //Информация о клиенте
+	OPT_PID   = 0x51 //Идентификатор клиента (PointID)
+	OPT_NETID = 0x52 //Сетевой идентификатор клиента (NetID)
 	// 0x53 Список идентификаторов
+	OPT_STAT = 0x55 //Статус клиента
+	// 0x00 – неизвестный статус
+	// 0х01 – гостевой доступ *
+	// 0x02 – отключен
+	// 0x03 – подключен *
+	// 0x04 – аутентифицирован *
+	// 0x05 – такой PointID уже занят
+	// 0x06 – ошибка аутентификации
 
-//	0x55 Статус клиента Возможные значения:
-//
-// 0x00 – неизвестный статус
-// 0х01 – гостевой доступ *
-// 0x02 – отключен
-// 0x03 – подключен *
-// 0x04 – аутентифицирован *
-// 0x05 – такой PointID уже занят
-// 0x06 – ошибка аутентификации
+	OPT_USER = 0x56 //Логин
+	OPT_PASW = 0x57 //Пароль
 )
 
 type VikingFrame struct {
-	len                  int  //uint16
-	tid                  byte //тип сообщения
-	destadr, srcadr, crc int  //uint16
-	msgid                byte
-	options              []Option //[]byte
-	txb                  []byte
-	Rxb                  []byte
-	buffer               []byte
-	lenBuf               int
+	tid             byte //тип сообщения
+	destadr, srcadr int  //uint16
+	msgid           byte
+	txb             []byte
+	body            []byte
+	// len int  //uint16
+	// options []Option //[]byte
+	// crc int //uint16
 }
 
 type Option struct {
@@ -87,12 +97,14 @@ func (vf *VikingFrame) EndTx() {
 func NewVikingFrameRx(rxb []byte) *VikingFrame {
 	vf := VikingFrame{
 		tid:     rxb[0],
-		destadr: IHL(rxb[1:]),
-		srcadr:  IHL(rxb[3:]),
-		Rxb:     rxb,
+		destadr: IHL(rxb[1:3]),
+		srcadr:  IHL(rxb[3:5]),
 	}
 	if vf.tid == TSLUG {
 		vf.msgid = rxb[5]
+		vf.body = rxb[6:]
+	} else {
+		vf.body = rxb[5:]
 	}
 	return &vf
 }
@@ -114,16 +126,16 @@ func (vf *VikingFrame) AddOptionInt(code byte, vv int) {
 
 func (vf *VikingFrame) GetOptions() map[int]Option {
 	opts := map[int]Option{}
-	pos := 6 //8 без lenb
-	for pos < len(vf.Rxb) {
-		code := vf.Rxb[pos]
+	pos := 0
+	for pos < len(vf.body)-1 {
+		code := vf.body[pos]
 		if code == 0xff {
 			break
 		}
-		lenOpt := int(vf.Rxb[pos+1])
-		if pos+lenOpt+2 < len(vf.Rxb) {
+		lenOpt := int(vf.body[pos+1])
+		if pos+lenOpt+2 < len(vf.body) {
 			// opts = append(opts, Option{code: code, body: vf.Rxb[pos+2 : pos+len+2]})
-			opts[int(code)] = Option{Code: code, Body: vf.Rxb[pos+2 : pos+lenOpt+2]}
+			opts[int(code)] = Option{Code: code, Body: vf.body[pos+2 : pos+lenOpt+2]}
 		}
 		pos += lenOpt + 2
 	}

@@ -11,7 +11,7 @@ type ConnectionServer struct {
 	clients         map[int]*Client //подключенные клиенты
 	register        chan *Client
 	unregister      chan *Client
-	broadcast       chan BroadMessage
+	routecast       chan RouteMessage
 	config          *ServerConfig
 	credentials     []AuthCredential //todo to map?
 	connectionCount int
@@ -49,7 +49,7 @@ type Client struct {
 	// logger   *log.Logger
 }
 
-type BroadMessage struct {
+type RouteMessage struct {
 	Dest int
 	Data []byte
 }
@@ -80,7 +80,7 @@ func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error)
 		clients:         make(map[int]*Client),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
-		broadcast:       make(chan BroadMessage),
+		routecast:       make(chan RouteMessage),
 		config:          config,
 		credentials:     credentials,
 		connectionCount: 0,

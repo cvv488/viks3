@@ -101,13 +101,13 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		return
 	}
 	vf := NewVikingFrameRx(bb)
-	if vf.msgid != 0x20 {
-		sayError1("это не пакет регистрации 0x20")
+	if vf.msgid != MID_QREG {
+		sayError1("это не пакет регистрации")
 		return
 	}
 	opts := vf.GetOptions()
 	//по полученному pointId найти его в списке разрешенных (в конфигурации)
-	op, ok := opts[0x51]
+	op, ok := opts[OPT_PID]
 	if ok != true {
 		sayError1("в пакете регистрации отсутствует pointId")
 		return
@@ -128,7 +128,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 	//проверить логин и пароль если есть
 	if cre.Username != "" {
-		if op, ok := opts[0x56]; ok != true {
+		if op, ok := opts[OPT_USER]; ok != true {
 			say(pids + ": нет юзера")
 			return
 		} else {
@@ -139,7 +139,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		}
 	}
 	if cre.Password != "" {
-		if op, ok := opts[0x57]; ok != true {
+		if op, ok := opts[OPT_PASW]; ok != true {
 			say(pids + ": нет пароля")
 			return
 		} else {
@@ -152,9 +152,9 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	//todo7 если такой уже есть отключить оба!
 
 	// Успешная аутентификация - ответить клиенту
-	txf := NewVikingFrame(TSLUG, 0, 0, 0x21)
-	txf.AddOptionInt(0x52, pointId) //NetID
-	txf.AddOptionInt(0x55, 4)       //Статус
+	txf := NewVikingFrame(TSLUG, 0, 0, MID_AREG)
+	txf.AddOptionInt(OPT_PID, pointId) //NetID
+	txf.AddOptionInt(OPT_STAT, 4)      //Статус=аутентифицирован
 	txf.EndTx()
 	err = Send(txf.txb, conn, writer, srv.config.Timeout)
 	if err != nil {
@@ -185,10 +185,10 @@ func (c *Client) handleClient(s *ConnectionServer) {
 	c.say("успешно аутентифицирован")
 
 	//подготовить пакет ответа на пинг
-	pif := NewVikingFrame(TSLUG, c.Id, 0, 0x29)
-	pif.AddOptionInt(0x51, c.Id) //PointID
-	pif.AddOptionInt(0x52, c.Id) //NetID
-	pif.AddOptionInt(0x55, 4)    //Статус
+	pif := NewVikingFrame(TSLUG, c.Id, 0, MID_PONG)
+	pif.AddOptionInt(OPT_PID, c.Id)   //PointID
+	pif.AddOptionInt(OPT_NETID, c.Id) //NetID
+	pif.AddOptionInt(OPT_STAT, 4)     //Статус
 	pif.EndTx()
 
 	count := 0
@@ -204,9 +204,9 @@ func (c *Client) handleClient(s *ConnectionServer) {
 		switch vf.tid {
 		case TSLUG:
 			switch vf.msgid {
-			case 0x22: //запрос статуса клиента
+			case MID_QSTAT: //запрос статуса клиента
 				opts := vf.GetOptions()
-				op, ok := opts[0x51]
+				op, ok := opts[OPT_PID]
 				if ok != true {
 					sayError1(pref + "-> req_status no pointId")
 					return
@@ -214,15 +214,15 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				pointId := IHL(op.Body)
 				c.say(fmt.Sprintf("-> req_status of %v", pointId))
 
-				sf := NewVikingFrame(TSLUG, 0, 0, 0x23)
-				sf.AddOptionInt(0x51, pointId) //PointID
-				sf.AddOptionInt(0x52, pointId) //NetID
+				sf := NewVikingFrame(TSLUG, 0, 0, MID_ASTAT)
+				sf.AddOptionInt(OPT_PID, pointId)   //PointID
+				sf.AddOptionInt(OPT_NETID, pointId) //NetID
 				mm := ""
 				if _, ok := s.clients[pointId]; ok == true {
-					sf.AddOptionInt(0x55, 4)
+					sf.AddOptionInt(OPT_STAT, 4)
 					mm = "on"
 				} else {
-					sf.AddOptionInt(0x55, 2) //отключен
+					sf.AddOptionInt(OPT_STAT, 2) //отключен
 					mm = "off"
 				}
 				sf.EndTx()
@@ -233,7 +233,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				}
 				c.say(fmt.Sprintf("<- status of %v is %v", pointId, mm))
 
-			case 0x28: //Запрос “Keep alive”
+			case MID_PING: //Запрос “Keep alive”
 				c.say(fmt.Sprintf("%v -> ping ", count))
 				err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
 				if err != nil {
@@ -244,21 +244,12 @@ func (c *Client) handleClient(s *ConnectionServer) {
 
 			default:
 				c.sayError1(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid))
-				// 0x20 - запрос на регистрацию
-				// 0x21 - ответ на запрос о регистрации
-				// 0x23 – ответ на запрос статуса клиента
-				// 0x24 – уведомление о подключении/отключении клиента
-				// 0x29 – ответ на запрос “Keep alive”
-				// 0x30 – подписка на уведомление о подключении/отключении клиента
-				// 0x31 – ответ сервера на команду подписки
-				// 0x32 – запрос статуса подписки
-				// 0xFE – команда не поддерживается
 			}
 		case TINFO:
 			//информационный пакет отправить по назначению
-			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
-			bm := BroadMessage{Dest: vf.destadr, Data: bb} // bb is vf.Rxb
-			s.broadcast <- bm
+			c.say(fmt.Sprintf("=> inf to %v %v", vf.destadr, count))
+			rm := RouteMessage{Dest: vf.destadr, Data: bb} // bb is vf.Rxb
+			s.routecast <- rm
 
 		case TSPOR:
 			c.say(fmt.Sprintf("==> spor to %v", vf.destadr))
@@ -288,7 +279,7 @@ func (srv *ConnectionServer) handleEvents() {
 			srv.mutex.Unlock()
 			say(fmt.Sprintf("Unregistered %v, links: %d", client.Id, len(srv.clients)))
 
-		case message := <-srv.broadcast:
+		case message := <-srv.routecast:
 			var cli *Client
 			var ok bool
 			srv.mutex.RLock()
@@ -299,7 +290,7 @@ func (srv *ConnectionServer) handleEvents() {
 			srv.mutex.RUnlock()
 			if ok {
 				//восстановить поле LEN в отправку, crc должен совпасть
-				lenb := BHL(len(message.Data)-2) 
+				lenb := BHL(len(message.Data) - 2)
 				err := SendFirst(lenb, cli.Writer)
 				if err != nil {
 					cli.sayError("send inf first", err)
