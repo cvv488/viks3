@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"fmt"
 
-	// "log"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -14,19 +14,23 @@ import (
 var timeter time.Time
 
 const (
-	APP_INFO = "Viking Server v1.4"
-	// SERVERID = "0000"
+	APP_INFO = "Viking Server v1.5"
 )
 
 func main() {
 	msg := "===== START " + APP_INFO + " ====="
 	defer say("===== STOP " + APP_INFO + " =====")
-	// fmt.Println(msg)
-	LogSetup()
+
+	//сначала настройка логера с загрузкой конфигурации
+	config, err := LoadConfig("config.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	LogSetup(config.Logs)
 	say(msg)
 
-	// Загружаем конфигурацию и учётные данные
-	server, err := NewConnectionServer("config.json", "auth.json")
+	// Загружаем учётные данные
+	server, err := NewConnectionServer(config, "auth.json")
 	if err != nil {
 		sayError("Ошибка инициализации сервера:", err)
 		return
@@ -114,38 +118,40 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 	pointId := IHL(op.Body)
 	pids := fmt.Sprintf("%04d", pointId)
-
-	var cre *AuthCredential
-	for i, pid := range srv.credentials {
-		if pid.Id == pointId { //есть в списке
-			cre = &srv.credentials[i]
-			break
-		}
-	}
-	if cre == nil {
-		say(pids + ": отсутствует в списке конфигурации")
-		return
-	}
-	//проверить логин и пароль если есть
-	if cre.Username != "" {
-		if op, ok := opts[OPT_USER]; ok != true {
-			say(pids + ": нет юзера")
-			return
-		} else {
-			if cre.Username != string(op.Body) {
-				say(pids + ": не верный юзер")
-				return
+	if srv.config.Debug1 == 1 { //debug - пускать всех
+	} else {
+		var cre *AuthCredential
+		for i, pid := range srv.credentials {
+			if pid.Id == pointId { //есть в списке
+				cre = &srv.credentials[i]
+				break
 			}
 		}
-	}
-	if cre.Password != "" {
-		if op, ok := opts[OPT_PASW]; ok != true {
-			say(pids + ": нет пароля")
+		if cre == nil {
+			say(pids + ": отсутствует в списке конфигурации")
 			return
-		} else {
-			if cre.Password != string(op.Body) {
-				say(pids + ": не верный пароль")
+		}
+		//проверить логин и пароль если есть
+		if cre.Username != "" {
+			if op, ok := opts[OPT_USER]; ok != true {
+				say(pids + ": нет юзера")
 				return
+			} else {
+				if cre.Username != string(op.Body) {
+					say(pids + ": не верный юзер")
+					return
+				}
+			}
+		}
+		if cre.Password != "" {
+			if op, ok := opts[OPT_PASW]; ok != true {
+				say(pids + ": нет пароля")
+				return
+			} else {
+				if cre.Password != string(op.Body) {
+					say(pids + ": не верный пароль")
+					return
+				}
 			}
 		}
 	}
@@ -153,8 +159,9 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 
 	// Успешная аутентификация - ответить клиенту
 	txf := NewVikingFrame(TSLUG, 0, 0, MID_AREG)
-	txf.AddOptionInt(OPT_PID, pointId) //NetID
-	txf.AddOptionInt(OPT_STAT, 4)      //Статус=аутентифицирован
+	txf.AddOptionInt(OPT_NETID, pointId) //NetID
+	txf.AddOptionInt(OPT_PID, pointId)   //и PointId на всякий случай
+	txf.AddOptionByte(OPT_STAT, 4)       //Статус=аутентифицирован
 	txf.EndTx()
 	err = Send(txf.txb, conn, writer, srv.config.Timeout)
 	if err != nil {
@@ -169,7 +176,6 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		Writer:   writer,
 		Reader:   reader,
 		LastPing: time.Now(),
-		// logger:   NewLogger(s.config.LogFile, fmt.Sprintf("%04d", pointId)) //у каждого клиента свой логер
 	}
 	srv.register <- client
 	client.handleClient(srv)
@@ -184,11 +190,11 @@ func (c *Client) handleClient(s *ConnectionServer) {
 	}()
 	c.say("успешно аутентифицирован")
 
-	//подготовить пакет ответа на пинг
+	//подготовить пакет ответа на пинг (понг)
 	pif := NewVikingFrame(TSLUG, c.Id, 0, MID_PONG)
 	pif.AddOptionInt(OPT_PID, c.Id)   //PointID
 	pif.AddOptionInt(OPT_NETID, c.Id) //NetID
-	pif.AddOptionInt(OPT_STAT, 4)     //Статус
+	pif.AddOptionByte(OPT_STAT, 4)    //Статус
 	pif.EndTx()
 
 	count := 0
@@ -219,10 +225,10 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				sf.AddOptionInt(OPT_NETID, pointId) //NetID
 				mm := ""
 				if _, ok := s.clients[pointId]; ok == true {
-					sf.AddOptionInt(OPT_STAT, 4)
+					sf.AddOptionByte(OPT_STAT, 4)
 					mm = "on"
 				} else {
-					sf.AddOptionInt(OPT_STAT, 2) //отключен
+					sf.AddOptionByte(OPT_STAT, 2) //отключен
 					mm = "off"
 				}
 				sf.EndTx()

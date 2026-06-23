@@ -3,7 +3,9 @@
   "max_connections": 10000,
   "wait_reg":10000,
   "timeout": 10000,
-  "xx log_file": "server.log",
+  // "logs": "d:/WORK/antx/logs", //windows dir
   "keep_alive_period": 10,
-  "keep_alive_timeout": 10
+  "keep_alive_timeout": 10,
+
+  "debug1": 1
 }

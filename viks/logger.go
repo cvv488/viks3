@@ -1,8 +1,9 @@
 package main
 
 import (
+	stdlog "log"
 	"os"
-	// "log"
+	"path/filepath"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -41,16 +42,39 @@ import (
 	log.Debug().Str("method", "GET").Str("path", "/api/users").Msg("HTTP запрос")
 */
 
-func LogSetup() {
+func LogSetup(logDir string) {
+
+	// Временный вывод в stderr на случай ошибки
+	stdlog.SetOutput(os.Stderr)
+	var logFile *os.File
+
+	// logDir = "" //tst
+	if logDir != "" {
+		//создать файл лога
+		err := os.MkdirAll(logDir, 0755)
+		if err != nil {
+			stdlog.Fatalln("Не удалось создать директорию для логов:", logDir)
+		}
+		logFile, err = os.OpenFile(filepath.Join(logDir, "viksrv.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			stdlog.Fatalln("Не удалось создать файл для логов:", err)
+		}
+	}
+
+	// Настраиваем zerolog
 	// Установка глобального уровня логирования
-	zerolog.SetGlobalLevel(zerolog.InfoLevel) // INFO + WARN, ERROR, FATAL
+	zerolog.SetGlobalLevel(zerolog.InfoLevel) //Устанавливаем уровень логирования: INFO + WARN, ERROR, FATAL
 
 	// Настройка формата времени
-	zerolog.TimeFieldFormat = "2006-01-02 15:04:05" // Человекочитаемый формат
+	zerolog.TimeFieldFormat = "2006-01-02 15:04:05"
 	// zerolog.TimeFieldFormat = zerolog.TimeFormatUnix // Unix timestamp
 
-	//в консоль без json
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	if logFile != nil {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: logFile})
+	} else {
+		//в консоль без json
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	}
 }
 
 func say(msg string) {

@@ -39,7 +39,7 @@ const (
 	OPT_PID   = 0x51 //Идентификатор клиента (PointID)
 	OPT_NETID = 0x52 //Сетевой идентификатор клиента (NetID)
 	// 0x53 Список идентификаторов
-	OPT_STAT = 0x55 //Статус клиента
+	OPT_STAT = 0x55 //Статус клиента (len=1!)
 	// 0x00 – неизвестный статус
 	// 0х01 – гостевой доступ *
 	// 0x02 – отключен
@@ -122,6 +122,11 @@ func (vf *VikingFrame) AddOptionInt(code byte, vv int) {
 	vf.txb = append(vf.txb, BHL(vv)...)
 	// op := Option{code: code, len: 2, body: BHL(vv)}
 	// vf.options = append(vf.options, op)
+}
+func (vf *VikingFrame) AddOptionByte(code byte, vv byte) {
+	vf.txb = append(vf.txb, code)
+	vf.txb = append(vf.txb, 1)
+	vf.txb = append(vf.txb, vv)
 }
 
 func (vf *VikingFrame) GetOptions() map[int]Option {

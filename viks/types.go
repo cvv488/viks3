@@ -25,9 +25,10 @@ type ServerConfig struct {
 	MaxConnections   int    `json:"max_connections"`
 	WaitReg          int    `json:"wait_reg"` //ожидание пакета регистрации, мс
 	Timeout          int    `json:"timeout"`  //read/write timeout, мс
-	LogFile          string `json:"log_file"`
+	Logs             string `json:"logs"`     //включение логов - папка логов
 	KeepAlivePeriod  int    `json:"keep_alive_period"`
 	KeepAliveTimeout int    `json:"keep_alive_timeout"`
+	Debug1          int    `json:"debug1"`
 }
 
 // Структура учётных данных
@@ -65,15 +66,15 @@ func (cli *Client) sayError1(msg string) {
 }
 
 // Создаёт новый сервер соединений с загрузкой конфигурации
-func NewConnectionServer(configFile, authFile string) (*ConnectionServer, error) {
-	config, err := LoadConfig(configFile)
-	if err != nil {
-		return nil, err
-	}
+func NewConnectionServer(config *ServerConfig, authFile string) (*ConnectionServer, error) {
 
-	credentials, err := loadAuthCredentials(authFile)
-	if err != nil {
-		return nil, err
+	var credentials []AuthCredential
+	var err error
+	if authFile != "" {
+		credentials, err = loadAuthCredentials(authFile)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &ConnectionServer{

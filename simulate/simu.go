@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// RUNMODE = 1 //1-0001 посылает всем остальным, 2-все посылают всем рандомно, 3-все посылают в один
-	CLIENTS = 2
+	CLIENTS    = 100 //всего клиентов
+	CLIENTS_PU = 10  //каждый такой% клиент это ПУ
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -20,32 +20,43 @@ var ioCount int
 
 func main() {
 	fmt.Println("----- START Simulate Viking -----")
+	// new clients
+	tcc := []TCPClient{}
+
 	// Загружаем конфигурацию
 	config, err := LoadConfig("simuconfig.json")
 	if err != nil {
 		log.Fatal("Ошибка загрузки конфигурации:", err)
 	}
-	// fmt.Println(config)
-
-	// new clients
-	tcc := []TCPClient{}
 	//клиенты из файла
 	// for _, cli := range config.Clients {
 	// client := NewTCPClient(cli, config)
 	// 	tcc = append(tcc, *client)
 	// }
-	//клиенты new
-	// if RUNMODE == 1 {
+
+	//клиенты созданы без файла
+	config.Clients = []ClientConfig{} //очистить взятые из файла
+	// idx := 0
+	// for _, ipu := range CLIENTS_PU {
+	// 	for _, ikp := range CLIENTS_KP {
+	// 		sid := fmt.Sprintf("%04d", idx+1)
+	// 		cli := ClientConfig{Id: idx + 1, Info: "Info" + sid, User: "User" + sid, Passw: "Passw" + sid}
+	// 		config.Clients = append(config.Clients, cli)
+	// 		client := NewTCPClient(idx, config)
+	// 		tcc = append(tcc, *client)
+	// 	}
+	// }
+
 	for i := 0; i < CLIENTS; i++ {
-		// sid := fmt.Sprintf("%04d", i)
-		// cli := ClientConfig{Id: i, Passw: sid + "p"}
-		// if i == 1 {
-		// 	cli.Mode = "1"
-		// }
+		sid := fmt.Sprintf("%04d", i+1)
+		cli := ClientConfig{Id: i + 1, Info: "Info" + sid, User: "User" + sid, Passw: "Passw" + sid}
+		if i%CLIENTS_PU == 0 {
+			cli.Mode = "pu"
+		}
+		config.Clients = append(config.Clients, cli)
 		client := NewTCPClient(i, config)
 		tcc = append(tcc, *client)
 	}
-	// }
 
 	// Обработчик сигналов для корректного завершения
 	sigChan := make(chan os.Signal, 1)
@@ -62,7 +73,7 @@ func main() {
 	//run clients
 	for _, cli := range tcc {
 		go cli.Start()
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * 100)
 	}
 
 	select {} // Бесконечное ожидание
@@ -77,6 +88,7 @@ func (c *TCPClient) Start() {
 	}
 	writer := bufio.NewWriter(conn)
 	reader := bufio.NewReader(conn)
+	// reader := bufio.NewReaderSize(conn, 65536)
 	c.conn = conn
 	c.Writer = writer
 	c.Reader = reader
@@ -108,106 +120,123 @@ func (c *TCPClient) Start() {
 		return
 	}
 	opts := rxf.GetOptions()
-	status := -1
+	status := false
 	if op, ok := opts[OPT_STAT]; ok == true {
-		is := IHL(op.Body)
+		is := op.Body[0]
 		if is == 4 || is == 3 || is == 1 {
-			status = is
+			status = true
 		}
 	} else {
 		c.sayError("-> no op55", nil)
 		return
 	}
-	if status < 0 {
+	if !status {
 		c.sayError("-> bad reg status", err)
 		return
 	}
 	c.state = 2
 	TotalScore++
-	c.say("Authorized")
+	c.say(fmt.Sprintf("Authorized %v", TotalScore))
 
-	// id:1 is ПУ, остальные КП
-	if c.id == 1 {
-		c.startHeartbeatPU()
-	} else {
-		c.startHeartbeatKP()
-	}
-
-	// Запускаем прием данных
-	// c.startReceiving()
+	c.startHeartbeat()
+	// if c.conf.Mode == "pu" {
+	// 	c.startHeartbeatPU()
+	// } else {
+	// 	c.startHeartbeatKP()
+	// }
 
 	c.Close()
 	c.say("exit")
 	TotalScore--
 }
 
-// ПУ в цикле запрашивает статус и отправляет данные всем КП
-func (c *TCPClient) startHeartbeatPU() {
-	c.say("Start PU")
-	dest := 2
-	data := make([]byte, 1024)
-	for {
-		time.Sleep(time.Millisecond * 1000)
+func (c *TCPClient) startHeartbeat() {
+	c.say("Start " + c.conf.Mode)
+	data := make([]byte, 10)
+	dataChan := make(chan string, 10)
+	go c.Receive(dataChan)
 
-		//отправка запроса статуса
-		stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
-		stf.AddOptionInt(OPT_PID, dest) //PointID
-		stf.EndTx()
-		if err := c.Send(stf.txb); err != nil {
-			c.sayError("send req status", err)
-			return
-		}
-		c.say(fmt.Sprintf("<- req status of %v ", dest))
-		//прием статуса
-		bb, err := ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
-		if err != nil {
-			c.sayError("rx req status", err)
-			return
-		}
-		vf := NewVikingFrameRx(bb)
-		if vf.msgid == MID_ASTAT {
-			c.say("-> status")
+	dest := 20
+	for {
+		if c.conf.Mode == "pu" {
+			fmt.Println("TotalScore=", TotalScore, "  dest=", dest)
+
+			//запрос статуса КП
+			stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+			stf.AddOptionInt(OPT_PID, dest) //PointID
+			stf.EndTx()
+			if err := c.Send(stf.txb); err != nil {
+				c.sayError("send req status", err)
+				return
+			}
+			c.say(fmt.Sprintf("<- req status of %v ", dest))
+			var staton bool
+			for {
+				msg := <-dataChan
+				if msg == "astat_on" {
+					staton = true
+					break
+				} else if msg == "astat_off" {
+					break
+				} else {
+					c.say(msg + "------------------as")
+				}
+			}
+
+			time.Sleep(time.Millisecond * 500)
+
+			if staton {
+				//отправка инф-пакета в КП и прием ответа
+				inf := NewVikingFrameInf(dest, c.id, data)
+				if err := c.Send(inf.txb); err != nil {
+					c.sayError("send inf", err)
+					return
+				}
+				c.say(fmt.Sprintf("<- INF to %v ", dest))
+				for {
+					msg := <-dataChan
+					if msg == "inf" {
+						break
+					} else {
+						c.say(msg + "-----------------inf")
+					}
+				}
+			}
+
+			dest++
+			if dest > CLIENTS { //TotalScore {
+				dest = 2
+				// c.say("------------ dest")
+			}
+			time.Sleep(time.Millisecond * 500)
+
 		} else {
-			c.say(fmt.Sprintf("-> no status msgid=0x%02X", vf.msgid))
+			time.Sleep(time.Millisecond * 3000)
+
+			//отправка пинга и прием понга
+			pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+			pif.AddOptionInt(OPT_PID, c.id) //PointID
+			pif.EndTx()
+			if err := c.Send(pif.txb); err != nil {
+				c.sayError("send ping", err)
+				return
+			}
+			c.say("<- ping")
+			for {
+				msg := <-dataChan
+				// fmt.Println(msg, " TotalScore=", TotalScore)
+				if msg == "pong" {
+					break
+				}
+			}
+
 		}
 
-		//отправка инф-пакета
-		inf := NewVikingFrameInf(dest, c.id, data)
-		if err := c.Send(inf.txb); err != nil {
-			c.sayError("send inf", err)
-			return
-		}
-		c.say(fmt.Sprintf("<= INF to %v ", dest))
-
-		// dest++
-		// if dest > CLIENTS {
-		// 	dest = 2
-		// }
 	}
 }
 
-// КП в цикле диалог пинга
-func (c *TCPClient) startHeartbeatKP() {
-	c.say("Start KP")
-	go c.ReadKP()
-	//пакет для пинга
-	pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
-	pif.AddOptionInt(OPT_PID, c.id) //PointID
-	pif.EndTx()
-
-	for {
-		if err := c.Send(pif.txb); err != nil {
-			c.sayError("send ping", err)
-			return
-		}
-		c.say("<- ping")
-
-		time.Sleep(time.Millisecond * 30000)
-	}
-}
-
-func (c *TCPClient) ReadKP() {
-	pref := "ReadKP"
+func (c *TCPClient) Receive(dataChan chan string) {
+	pref := "receive"
 	for {
 		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
@@ -215,25 +244,47 @@ func (c *TCPClient) ReadKP() {
 			return
 		}
 		rxf := NewVikingFrameRx(bb)
+
 		switch rxf.tid {
 		case TSLUG:
 			switch rxf.msgid {
-			case MID_ASTAT: //ответ на запрос статуса клиента 0x22: //запрос статуса клиента
-				c.say("-> status")
+			case MID_ASTAT:
+				var rxstat byte
+				opts := rxf.GetOptions()
+				if op, ok := opts[OPT_STAT]; ok != true {
+					c.sayError(pref+"po55", nil)
+				} else {
+					rxstat = op.Body[0]
+				}
+				if rxstat == 4 {
+					c.say("-> status on")
+					dataChan <- "astat_on"
+				} else {
+					c.say("-> status off ===========================")
+					dataChan <- "astat_off"
+				}
+
 			case MID_PONG:
 				c.say("-> pong")
+				dataChan <- "pong"
+
 			default:
 				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", rxf.msgid), nil)
 			}
 		case TINFO:
-			c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
-			//ответить на инф-пакет отправителю
-			inf := NewVikingFrameInf(rxf.srcadr, c.id, rxf.body)
-			if err := c.Send(inf.txb); err != nil {
-				c.sayError("send inf", err)
-				return
+			if c.conf.Mode == "pu" {
+				c.say(fmt.Sprintf("-> INF from %v ", rxf.srcadr))
+				dataChan <- "inf"
+			} else {
+				c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
+				// ответить на инф-пакет отправителю
+				inf := NewVikingFrameInf(rxf.srcadr, c.id, rxf.body)
+				if err := c.Send(inf.txb); err != nil {
+					c.sayError("send inf", err)
+					return
+				}
+				c.say(fmt.Sprintf("<= INF to %v ", rxf.srcadr))
 			}
-			c.say(fmt.Sprintf("<= INF to %v ", rxf.srcadr))
 
 		case TSPOR:
 			c.say("-> SPOR")
@@ -244,7 +295,266 @@ func (c *TCPClient) ReadKP() {
 	}
 }
 
-func (c *TCPClient) startHeartbeat() {
+// ПУ в цикле всем КП: запрашивает статус - отправляет инф-пакет - ждет ответный инф-пакет
+// func (c *TCPClient) startHeartbeatPU() {
+// 	c.say("Start PU")
+// 	dest := 2
+// 	data := make([]byte, 1024)
+// 	dataChan := make(chan string, 10) // буферный канал для данных
+// 	go c.ReceivePu(dataChan)
+// 	for {
+// 		time.Sleep(time.Millisecond * 1000)
+
+// 		//получение статуса КП
+// 		stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+// 		stf.AddOptionInt(OPT_PID, dest) //PointID
+// 		stf.EndTx()
+// 		if err := c.Send(stf.txb); err != nil {
+// 			c.sayError("send req status", err)
+// 			return
+// 		}
+// 		c.say(fmt.Sprintf("<- req status of %v ", dest))
+
+// 		bb, err := ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
+// 		if err != nil {
+// 			c.sayError("rx req status", err)
+// 			return
+// 		}
+// 		vf := NewVikingFrameRx(bb)
+// 		if vf.msgid == MID_ASTAT {
+// 			c.say("-> status")
+// 		} else {
+// 			c.sayError(fmt.Sprintf("-> no status msgid=0x%02X", vf.msgid), nil)
+// 		}
+
+// 		//отправка инф-пакета в КП
+// 		inf := NewVikingFrameInf(dest, c.id, data)
+// 		if err := c.Send(inf.txb); err != nil {
+// 			c.sayError("send inf", err)
+// 			return
+// 		}
+// 		c.say(fmt.Sprintf("<= INF to %v ", dest))
+
+// 		//прием инф-пакета - ответа от КП
+// 		bb, err = ReadPac(c.conn, c.Reader, c.gconfig.Timeout)
+// 		if err != nil {
+// 			c.sayError("rx inf", err)
+// 			return
+// 		}
+// 		rxinf := NewVikingFrameRx(bb)
+// 		if rxinf.tid == TINFO {
+// 			c.say(fmt.Sprintf("=> INF from %v ", rxinf.srcadr))
+// 		} else {
+// 			c.sayError(fmt.Sprintf("-> no inf=0x%02X", rxinf.tid), nil)
+// 		}
+
+// 	}
+// }
+
+// func (c *TCPClient) ReceivePu(dataChan chan string) {
+// 	pref := "receivePu"
+// 	for {
+// 		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
+// 		if err != nil {
+// 			c.sayError(pref, err)
+// 			return
+// 		}
+// 		rxf := NewVikingFrameRx(bb)
+// 		switch rxf.tid {
+// 		case TSLUG:
+// 			switch rxf.msgid {
+// 			case MID_ASTAT:
+// 				c.say("-> status")
+// 				dataChan <- "astat"
+// 			default:
+// 				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", rxf.msgid), nil)
+// 			}
+// 		case TINFO:
+// 			c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
+// 			dataChan <- "rx_inf"
+
+// 		case TSPOR:
+// 			c.say("-> SPOR")
+
+// 		default:
+// 			c.sayError(fmt.Sprintf("~~> unknown tid=%v", rxf.tid), nil)
+// 		}
+// 	}
+// }
+
+// КП в цикле диалог пинга
+// func (c *TCPClient) startHeartbeatKP() {
+// 	c.say("Start KP")
+// 	dataChan := make(chan string, 10) // буферный канал для данных
+// 	go c.ReceiveKp(dataChan)
+// 	//пакет для пинга
+// 	pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+// 	pif.AddOptionInt(OPT_PID, c.id) //PointID
+// 	pif.EndTx()
+
+// 	for {
+// 		if err := c.Send(pif.txb); err != nil {
+// 			c.sayError("send ping", err)
+// 			return
+// 		}
+// 		c.say("<- ping")
+
+// 		//ждать pong
+// 		for {
+// 			msg := <-dataChan
+// 			fmt.Println(msg, " TotalScore=", TotalScore)
+// 			if msg == "pong" {
+// 				break
+// 			}
+// 		}
+// 		time.Sleep(time.Millisecond * 10000)
+// 	}
+// }
+
+// func (c *TCPClient) ReceiveKp(dataChan chan string) {
+// 	pref := "receiveKp"
+// 	for {
+// 		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
+// 		if err != nil {
+// 			c.sayError(pref, err)
+// 			return
+// 		}
+// 		rxf := NewVikingFrameRx(bb)
+// 		switch rxf.tid {
+// 		case TSLUG:
+// 			switch rxf.msgid {
+// 			// case MID_ASTAT:
+// 			// 	c.say("-> status")
+// 			// 	dataChan <- "a_stat"
+// 			case MID_PONG:
+// 				c.say("-> pong")
+// 				dataChan <- "pong"
+// 			default:
+// 				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", rxf.msgid), nil)
+// 			}
+// 		case TINFO:
+// 			c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
+// 			// dataChan <- "rx_inf"
+// 			// ответить на инф-пакет отправителю
+// 			inf := NewVikingFrameInf(rxf.srcadr, c.id, rxf.body)
+// 			if err := c.Send(inf.txb); err != nil {
+// 				c.sayError("send inf", err)
+// 				return
+// 			}
+// 			c.say(fmt.Sprintf("<= INF to %v ", rxf.srcadr))
+
+// 		case TSPOR:
+// 			c.say("-> SPOR")
+
+// 		default:
+// 			c.sayError(fmt.Sprintf("~~> unknown tid=%v", rxf.tid), nil)
+// 		}
+// 	}
+// }
+
+// func (c *TCPClient) Receive(dataChan chan string) {
+// 	pref := "receive"
+// 	for {
+// 		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
+// 		if err != nil {
+// 			c.sayError(pref, err)
+// 			return
+// 		}
+// 		rxf := NewVikingFrameRx(bb)
+// 		switch rxf.tid {
+// 		case TSLUG:
+// 			switch rxf.msgid {
+// 			case MID_ASTAT:
+// 				c.say("-> status")
+// 				dataChan <- "a_stat"
+// 			case MID_PONG:
+// 				c.say("-> pong")
+// 			default:
+// 				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", rxf.msgid), nil)
+// 			}
+// 		case TINFO:
+// 			c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
+// 			// dataChan <- "rx_inf"
+// 			// ответить на инф-пакет отправителю
+// 			inf := NewVikingFrameInf(rxf.srcadr, c.id, rxf.body)
+// 			if err := c.Send(inf.txb); err != nil {
+// 				c.sayError("send inf", err)
+// 				return
+// 			}
+// 			c.say(fmt.Sprintf("<= INF to %v ", rxf.srcadr))
+
+// 		case TSPOR:
+// 			c.say("-> SPOR")
+
+// 		default:
+// 			c.sayError(fmt.Sprintf("~~> unknown tid=%v", rxf.tid), nil)
+// 		}
+// 	}
+// }
+
+// func (c *TCPClient) startHeartbeat(mode string) {
+// 	c.say("startHeartbeat:" + mode)
+// 	ticker := time.NewTicker(time.Second * 5) //time.Duration(c.gconfig.PingInterval))
+// 	defer func() {
+// 		ticker.Stop()
+// 	}()
+// 	// data := make([]byte, 10240)
+
+// 	//пакет для пинга
+// 	pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+// 	pif.AddOptionInt(OPT_PID, c.id) //PointID
+// 	pif.EndTx()
+
+// 	//пакет для запроса статуса себя же
+// 	stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+// 	stf.AddOptionInt(OPT_PID, c.id) //PointID
+// 	stf.EndTx()
+
+// 	destCount := 2
+// 	for {
+// 		select {
+// 		case <-ticker.C:
+// 			if c.state != 2 {
+// 				continue
+// 			}
+// 			if mode == "pu" {
+// 				//отправка запроса статуса
+// 				stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+// 				stf.AddOptionInt(OPT_PID, destCount) //PointID
+// 				stf.EndTx()
+// 				if err := c.Send(stf.txb); err != nil {
+// 					c.sayError("send req status", err)
+// 					return
+// 				}
+// 				c.say(fmt.Sprintf("<- req status of %v ", destCount))
+// 			}
+// 		}
+// 		fmt.Println("")
+// 	}
+
+// 	//пакет для пинга
+// 	// pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+// 	// pif.AddOptionInt(OPT_PID, c.id) //PointID
+// 	// pif.EndTx()
+
+// 	// for {
+// 	// 	if err := c.Send(pif.txb); err != nil {
+// 	// 		c.sayError("send ping", err)
+// 	// 		return
+// 	// 	}
+// 	// 	c.say("<- ping")
+
+// 	// 	time.Sleep(time.Millisecond * 30000)
+// 	// }
+// }
+
+/*
+
+
+
+
+
+func (c *TCPClient) startHeartbeat2() {
 	tickerPing := time.NewTicker(time.Duration(c.gconfig.PingInterval) * time.Second)
 	tickerInfo := time.NewTicker(100 * time.Millisecond)
 	// ticker3 := time.NewTicker(1 * time.Minute)  // каждую минуту
@@ -341,7 +651,7 @@ func (c *TCPClient) startHeartbeat() {
 		}
 	}
 }
-
+*/
 // запускает прием данных от сервера
 // func (c *TCPClient) startReceiving() {
 // 	c.say("startReceiving")

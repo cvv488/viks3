@@ -157,6 +157,9 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 	//и чтение тела пакета с дедлайном
 	length := IHL(lenb) + 2 // осталось принять lenb+2crc
 	if length < 3 {
+		//очистить буфер
+		available := reader.Buffered()
+		reader.Discard(available)
 		return nil, fmt.Errorf("%v bad short pac", pref)
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
