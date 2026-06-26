@@ -211,7 +211,7 @@ func (c *TCPClient) startHeartbeat() {
 			time.Sleep(time.Millisecond * 500)
 
 		} else {
-			time.Sleep(time.Millisecond * 3000)
+			time.Sleep(time.Millisecond * 30000)
 
 			//отправка пинга и прием понга
 			pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)

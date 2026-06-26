@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	// "encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -78,57 +77,14 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 	return data, nil
 }
 
-// func ReadPac(conn net.Conn, reader *bufio.Reader, timeout int) ([]byte, error) {
-// 	if err := conn.SetReadDeadline(time.Now().Add(time.Duration(timeout) * time.Second)); err != nil {
-// 		return nil, fmt.Errorf("set read deadline failed: %w", err)
-// 	}
-// 	// Читаем 2 байта длины
-// 	lengthBuf := make([]byte, 2)
-// 	_, err := io.ReadFull(reader, lengthBuf)
-// 	if err != nil {
-// 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-// 			return nil, fmt.Errorf("read length timeout: %w", err)
-// 		}
-// 		return nil, fmt.Errorf("read length failed: %w", err)
-// 	}
-// 	length := binary.BigEndian.Uint16(lengthBuf)
-// 	if length > 65535 {
-// 		return nil, fmt.Errorf("packet too large: %d bytes", length)
-// 	}
-// 	packet := make([]byte, length)
-// 	// Первая попытка чтения тела пакета
-// 	n, err := reader.Read(packet)
-// 	if err != nil && n == 0 {
-// 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-// 			// Таймаут, но данных нет — ошибка
-// 			return nil, fmt.Errorf("read packet timeout (no data): %w", err)
-// 		}
-// 		return nil, fmt.Errorf("read packet failed: %w", err)
-// 	}
-// 	// Если прочитали не всё, дочитываем с новым таймаутом
-// 	if n < int(length) {
-// 		if err := conn.SetReadDeadline(time.Now().Add(time.Duration(timeout) * time.Second)); err != nil {
-// 			return nil, fmt.Errorf("set read deadline for retry failed: %w", err)
-// 		}
-// 		n2, err := io.ReadFull(reader, packet[n:length])
-// 		if err != nil {
-// 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-// 				return nil, fmt.Errorf("partial packet timeout: read %d/%d bytes", n, length)
-// 			}
-// 			return nil, fmt.Errorf("incomplete packet: expected %d bytes, read %d: %w", length, n+n2, err)
-// 		}
-// 	}
-// 	return packet, nil
-// }
-
-// возвращает тело пакета без LEN[2]
+// вычитывает и возвращает тело пакета без LEN[2]
 // быстрый - без аллокаций и внешнего буфера
 // если указан timeoutms ждем первые 2 байта с этим таймаутом, но следующие байты всегда дочитываются с таймаутом 5с
 // Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
 // TODO пофиксить ситуации когда пришло не ожидаемое количество байт
 func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error) {
 	const pref = "ReadPac:"
-	//установка или сброс тамаута
+	//установка тамаута
 	if timeoutms > 0 {
 		timeout := time.Duration(timeoutms) * time.Millisecond
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil { //не одноразовый
@@ -138,7 +94,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 		//бесконечный таймаут 'conn.SetReadDeadline(time.Time{})' не все реализации поддерживают
 		// if err := conn.SetReadDeadline(time.Now().Add(100 * 365 * 24 * time.Hour)); err != nil { уст на 100лет
 		if err := conn.SetReadDeadline(time.Date(3000, time.January, 1, 0, 0, 0, 0, time.UTC)); err != nil { //3000 год - без вычислений
-			return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
+			return nil, fmt.Errorf("%v setTimeout2: %v", pref, err)
 		}
 	}
 	// чтение длины пакета[2]

@@ -2,8 +2,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
-
+	"io"
 	"log"
 	"net"
 	"os"
@@ -14,7 +15,7 @@ import (
 var timeter time.Time
 
 const (
-	APP_INFO = "Viking Server v1.5"
+	APP_INFO = "Viking Server v1.6"
 )
 
 func main() {
@@ -32,7 +33,7 @@ func main() {
 	// Загружаем учётные данные
 	server, err := NewConnectionServer(config, "auth.json")
 	if err != nil {
-		sayError("Ошибка инициализации сервера:", err)
+		sayError("NewConnectionServer", err)
 		return
 	}
 
@@ -43,7 +44,6 @@ func main() {
 		<-sigChan
 		say("Получен сигнал завершения, останавливаем сервер...")
 		server.Stop()
-		// return ?
 	}()
 
 	server.Start()
@@ -52,7 +52,7 @@ func main() {
 func (srv *ConnectionServer) Start() {
 	listener, err := net.Listen("tcp", ":"+srv.config.Port)
 	if err != nil {
-		sayError("Ошибка при запуске сервера:", err)
+		sayError("Ошибка при запуске сервера", err)
 	}
 	defer listener.Close()
 	say("Сервер запущен на порту " + srv.config.Port)
@@ -62,7 +62,7 @@ func (srv *ConnectionServer) Start() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			sayError("Ошибка при принятии соединения:", err)
+			sayError("Ошибка при принятии соединения", err)
 			continue
 		}
 		say("Новое подключение: " + conn.RemoteAddr().String())
@@ -72,7 +72,7 @@ func (srv *ConnectionServer) Start() {
 		if srv.connectionCount >= srv.config.MaxConnections {
 			srv.mutex.Unlock()
 			conn.Close()
-			sayError1("Сервер перегружен. Попробуйте позже")
+			say("Сервер перегружен. Попробуйте позже")
 			continue
 		}
 		srv.connectionCount++
@@ -82,7 +82,7 @@ func (srv *ConnectionServer) Start() {
 	}
 }
 
-// Аутентифицирует клиента перед регистрацией
+// Аутентификация клиента
 func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	defer func() {
 		srv.mutex.Lock()
@@ -93,10 +93,8 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 
 	reader := bufio.NewReader(conn) //def buf 4k, writer := bufio.NewWriterSize(conn, 8192) // буфер 8 КБ
 	writer := bufio.NewWriter(conn)
-	if err := clearBufferSafe(reader, 4096); err != nil { // максимум 4 КБ мусора
-		sayError1(err.Error())
-		return
-	}
+	//при тестировании иногда выявлялся мусор в новом подключении - очистить
+	clearBufferSafe(reader, 4096)
 
 	//ждем аутентификацию с таймаутом
 	bb, err := ReadPac(conn, reader, srv.config.WaitReg)
@@ -113,7 +111,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	//по полученному pointId найти его в списке разрешенных (в конфигурации)
 	op, ok := opts[OPT_PID]
 	if ok != true {
-		sayError1("в пакете регистрации отсутствует pointId")
+		sayError1("в пакете регистрации нет pointId")
 		return
 	}
 	pointId := IHL(op.Body)
@@ -128,32 +126,36 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 			}
 		}
 		if cre == nil {
-			say(pids + ": отсутствует в списке конфигурации")
+			say(pids + ": запрещен")
 			return
 		}
 		//проверить логин и пароль если есть
 		if cre.Username != "" {
 			if op, ok := opts[OPT_USER]; ok != true {
-				say(pids + ": нет юзера")
+				say(pids + ": в пакете регистрации нет user")
 				return
 			} else {
 				if cre.Username != string(op.Body) {
-					say(pids + ": не верный юзер")
+					say(pids + ": не верный user")
 					return
 				}
 			}
 		}
 		if cre.Password != "" {
 			if op, ok := opts[OPT_PASW]; ok != true {
-				say(pids + ": нет пароля")
+				say(pids + ": в пакете регистрации нет password")
 				return
 			} else {
 				if cre.Password != string(op.Body) {
-					say(pids + ": не верный пароль")
+					say(pids + ": не верный password")
 					return
 				}
 			}
 		}
+	}
+	info := ""
+	if op, ok := opts[OPT_INF]; ok == true {
+		info = string(op.Body)
 	}
 	//todo7 если такой уже есть отключить оба!
 
@@ -165,13 +167,14 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	txf.EndTx()
 	err = Send(txf.txb, conn, writer, srv.config.Timeout)
 	if err != nil {
-		sayError("asend", err)
+		sayError(pids+": asend", err)
 		return
 	}
 
 	client := &Client{
 		Id:       pointId,
 		ids:      pids,
+		Info:     info,
 		Conn:     conn,
 		Writer:   writer,
 		Reader:   reader,
@@ -191,7 +194,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 	c.say("успешно аутентифицирован")
 
 	//подготовить пакет ответа на пинг (понг)
-	pif := NewVikingFrame(TSLUG, c.Id, 0, MID_PONG)
+	pif := NewVikingFrame(TSLUG, 0, 0, MID_PONG)
 	pif.AddOptionInt(OPT_PID, c.Id)   //PointID
 	pif.AddOptionInt(OPT_NETID, c.Id) //NetID
 	pif.AddOptionByte(OPT_STAT, 4)    //Статус
@@ -202,7 +205,6 @@ func (c *Client) handleClient(s *ConnectionServer) {
 		bb, err := ReadPac(c.Conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
 			c.sayError(pref, err)
-			// continue //
 			return
 		}
 		count++
@@ -214,7 +216,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				opts := vf.GetOptions()
 				op, ok := opts[OPT_PID]
 				if ok != true {
-					sayError1(pref + "-> req_status no pointId")
+					c.sayError1(pref + "-> req_status no pointId")
 					return
 				}
 				pointId := IHL(op.Body)
@@ -223,24 +225,21 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				sf := NewVikingFrame(TSLUG, 0, 0, MID_ASTAT)
 				sf.AddOptionInt(OPT_PID, pointId)   //PointID
 				sf.AddOptionInt(OPT_NETID, pointId) //NetID
-				mm := ""
-				if _, ok := s.clients[pointId]; ok == true {
-					sf.AddOptionByte(OPT_STAT, 4)
-					mm = "on"
-				} else {
-					sf.AddOptionByte(OPT_STAT, 2) //отключен
-					mm = "off"
+				astat := 4
+				if _, ok := s.clients[pointId]; ok != true {
+					astat = 2 //отключен
 				}
+				sf.AddOptionByte(OPT_STAT, byte(astat))
 				sf.EndTx()
 				err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
 				if err != nil {
-					c.sayError("send status", err)
+					c.sayError("send astat", err)
 					return
 				}
-				c.say(fmt.Sprintf("<- status of %v is %v", pointId, mm))
+				c.say(fmt.Sprintf("<- status of %v is %v", pointId, astat))
 
 			case MID_PING: //Запрос “Keep alive”
-				c.say(fmt.Sprintf("%v -> ping ", count))
+				c.say("-> ping")
 				err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
 				if err != nil {
 					c.sayError("send pong", err)
@@ -249,12 +248,23 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				c.say("<- pong")
 
 			default:
+				//отправить ответ на неподдерживаемый тип сообщения
+				//Note: также касается и известных команд протокола которые не поддерживаются версией, например подписки
+				sf := NewVikingFrame(TSLUG, 0, 0, MID_UNSU)
+				sf.EndTx()
+				err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
+				if err != nil {
+					c.sayError("send unsupport", err)
+					return
+				}
+				c.say("<- unsupport")
 				c.sayError1(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid))
 			}
+
 		case TINFO:
-			//информационный пакет отправить по назначению
-			c.say(fmt.Sprintf("=> inf to %v %v", vf.destadr, count))
-			rm := RouteMessage{Dest: vf.destadr, Data: bb} // bb is vf.Rxb
+			//информационный пакет перенаправить по назначению
+			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
+			rm := RouteMessage{Dest: vf.destadr, Data: bb}
 			s.routecast <- rm
 
 		case TSPOR:
@@ -274,7 +284,7 @@ func (srv *ConnectionServer) handleEvents() {
 			srv.mutex.Lock()
 			srv.clients[client.Id] = client
 			srv.mutex.Unlock()
-			say(fmt.Sprintf("Registered %v, links: %d", client.Id, len(srv.clients)))
+			say(fmt.Sprintf("Registered %v, total %d", client.Id, len(srv.clients)))
 
 		case client := <-srv.unregister:
 			srv.mutex.Lock()
@@ -283,7 +293,7 @@ func (srv *ConnectionServer) handleEvents() {
 				client.Conn.Close()
 			}
 			srv.mutex.Unlock()
-			say(fmt.Sprintf("Unregistered %v, links: %d", client.Id, len(srv.clients)))
+			say(fmt.Sprintf("Unregistered %v, total %d", client.Id, len(srv.clients)))
 
 		case message := <-srv.routecast:
 			var cli *Client
@@ -291,7 +301,8 @@ func (srv *ConnectionServer) handleEvents() {
 			srv.mutex.RLock()
 			if cli, ok = srv.clients[message.Dest]; ok == true { //клиент Dest есть
 			} else {
-				say(fmt.Sprintf("Bad Dest %v", message.Dest))
+				say(fmt.Sprintf("No route: Bad Dest %v", message.Dest))
+				//todo отправить резерным клиентам
 			}
 			srv.mutex.RUnlock()
 			if ok {
@@ -299,14 +310,14 @@ func (srv *ConnectionServer) handleEvents() {
 				lenb := BHL(len(message.Data) - 2)
 				err := SendFirst(lenb, cli.Writer)
 				if err != nil {
-					cli.sayError("send inf first", err)
+					cli.sayError("routecast", err)
 					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
 					return
 				}
 
 				err = Send(message.Data, cli.Conn, cli.Writer, srv.config.Timeout)
 				if err != nil {
-					cli.sayError("send inf", err)
+					cli.sayError("routecast", err)
 					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
 					return
 				}
@@ -327,4 +338,59 @@ func (srv *ConnectionServer) Stop() {
 		value.Conn.Close()
 	}
 	srv.clients = make(map[int]*Client) //clr
+}
+
+// Загружает конфигурацию из файла
+func LoadConfig(fpath string) (*ServerConfig, error) {
+	bb, err := ReadFileToBytesJson(fpath)
+	if err != nil {
+		return nil, err
+	}
+	var config ServerConfig
+	err = json.Unmarshal(bb, &config)
+	if err != nil {
+		return nil, err
+	}
+	return &config, err
+}
+
+// Загружает учётные данные из файла
+func loadAuthCredentials(filename string) ([]AuthCredential, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось открыть файл аутентификации: %v", err)
+	}
+	defer file.Close()
+
+	var credentials []AuthCredential
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&credentials)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка парсинга учётных данных: %v", err)
+	}
+
+	return credentials, nil
+}
+
+func clearBufferSafe(reader *bufio.Reader, maxBytes int) error {
+	if reader.Buffered() <= 0 {
+		return nil
+	}
+	discarded := 0
+	buf := make([]byte, 1024) // буфер для чтения
+	for discarded < maxBytes {
+		n, err := reader.Read(buf)
+		discarded += n
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		// Если прочитали меньше, чем в буфере — значит, данных больше нет
+		if n < len(buf) {
+			return nil
+		}
+	}
+	return fmt.Errorf("clearBufferSafe: превышен лимит очистки, прочитано %d байт", discarded)
 }

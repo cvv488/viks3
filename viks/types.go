@@ -28,13 +28,12 @@ type ServerConfig struct {
 	Logs             string `json:"logs"`     //включение логов - папка логов
 	KeepAlivePeriod  int    `json:"keep_alive_period"`
 	KeepAliveTimeout int    `json:"keep_alive_timeout"`
-	Debug1          int    `json:"debug1"`
+	Debug1           int    `json:"debug1"`
 }
 
-// Структура учётных данных
 type AuthCredential struct {
 	Id       int    `json:"id"`
-	Info     string `json:"info"`
+	Rem      string `json:"rem"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
@@ -42,6 +41,7 @@ type AuthCredential struct {
 type Client struct {
 	Id       int
 	ids      string //строка-id для лога
+	Info     string //информация - опция50 от клиента
 	Conn     net.Conn
 	Writer   *bufio.Writer
 	Reader   *bufio.Reader
