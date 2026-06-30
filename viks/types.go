@@ -23,11 +23,10 @@ type ConnectionServer struct {
 type ServerConfig struct {
 	Port             string `json:"port"`
 	MaxConnections   int    `json:"max_connections"`
-	WaitReg          int    `json:"wait_reg"` //ожидание пакета регистрации, мс
-	Timeout          int    `json:"timeout"`  //read/write timeout, мс
-	Logs             string `json:"logs"`     //включение логов - папка логов
-	KeepAlivePeriod  int    `json:"keep_alive_period"`
-	KeepAliveTimeout int    `json:"keep_alive_timeout"`
+	WaitReg          int    `json:"wait_reg"`           //ожидание пакета регистрации, мс
+	Timeout          int    `json:"timeout"`            //read/write timeout, мс
+	Logs             string `json:"logs"`               //включение логов - папка логов
+	KeepAliveTimeout int    `json:"keep_alive_timeout"` //отключить молчащий объект спустя таймаут, мс
 	Debug1           int    `json:"debug1"`
 }
 
@@ -39,14 +38,15 @@ type AuthCredential struct {
 }
 
 type Client struct {
-	Id       int
-	ids      string //строка-id для лога
-	Info     string //информация - опция50 от клиента
-	Conn     net.Conn
-	Writer   *bufio.Writer
-	Reader   *bufio.Reader
-	LastPing time.Time // время последнего успешного пинга
-	Mutex    sync.Mutex
+	Id        int
+	ids       string //строка-id для лога
+	Info      string //информация - опция50 от клиента
+	Conn      net.Conn
+	Writer    *bufio.Writer
+	Reader    *bufio.Reader
+	KaTimeout int
+	Mutex     sync.Mutex
+	// LastLive  time.Time // время последнего пакета от клиента
 	// logger   *log.Logger
 }
 

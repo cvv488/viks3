@@ -4,8 +4,7 @@
   "wait_reg":10000,
   "timeout": 10000,
   // "logs": "d:/WORK/antx/logs", //windows dir
-  "keep_alive_period": 10,
-  "keep_alive_timeout": 10,
+  "keep_alive_timeout": 20000,
 
   "debug1": 1
 }

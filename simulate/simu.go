@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	CLIENTS    = 100 //всего клиентов
-	CLIENTS_PU = 10  //каждый такой% клиент это ПУ
+	AMOUNT_KP = 5
+	AMOUNT_PU = 5
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -36,25 +36,23 @@ func main() {
 
 	//клиенты созданы без файла
 	config.Clients = []ClientConfig{} //очистить взятые из файла
-	// idx := 0
-	// for _, ipu := range CLIENTS_PU {
-	// 	for _, ikp := range CLIENTS_KP {
-	// 		sid := fmt.Sprintf("%04d", idx+1)
-	// 		cli := ClientConfig{Id: idx + 1, Info: "Info" + sid, User: "User" + sid, Passw: "Passw" + sid}
-	// 		config.Clients = append(config.Clients, cli)
-	// 		client := NewTCPClient(idx, config)
-	// 		tcc = append(tcc, *client)
-	// 	}
-	// }
-
-	for i := 0; i < CLIENTS; i++ {
-		sid := fmt.Sprintf("%04d", i+1)
-		cli := ClientConfig{Id: i + 1, Info: "Info" + sid, User: "User" + sid, Passw: "Passw" + sid}
-		if i%CLIENTS_PU == 0 {
-			cli.Mode = "pu"
-		}
+	idx := 0
+	for n := range AMOUNT_KP {
+		idkp := n + 1
+		sidkp := fmt.Sprintf("%04d", idkp)
+		cli := ClientConfig{Id: idkp, Info: "Info" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
 		config.Clients = append(config.Clients, cli)
-		client := NewTCPClient(i, config)
+		client := NewTCPClient(idx, config)
+		idx++
+		tcc = append(tcc, *client)
+	}
+	for n := range AMOUNT_PU {
+		idpu := n + 1001
+		sidpu := fmt.Sprintf("%04d", idpu)
+		cli := ClientConfig{Id: idpu, Info: "Info" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
+		config.Clients = append(config.Clients, cli)
+		client := NewTCPClient(idx, config)
+		idx++
 		tcc = append(tcc, *client)
 	}
 
@@ -109,8 +107,8 @@ func (c *TCPClient) Start() {
 	}
 
 	//прием ответа со статусом регистрации
-	bb, err := ReadPac(conn, reader, c.gconfig.Timeout)
-	if err != nil {
+	bb, reto, err := ReadPac(conn, reader, c.gconfig.Timeout)
+	if err != nil || reto {
 		c.sayError("read status", err)
 		return
 	}
@@ -150,14 +148,18 @@ func (c *TCPClient) Start() {
 	TotalScore--
 }
 
+//ПУ в цикле запрашивает статус КП - отпрапвляет инф-пакет - ждет инф-ответ
+//КП в цикле отпраляет пинг - ждет понг, получив инф-пакет отвечает
+
 func (c *TCPClient) startHeartbeat() {
 	c.say("Start " + c.conf.Mode)
 	data := make([]byte, 10)
 	dataChan := make(chan string, 10)
 	go c.Receive(dataChan)
 
-	dest := 20
+	dest := 1
 	for {
+
 		if c.conf.Mode == "pu" {
 			fmt.Println("TotalScore=", TotalScore, "  dest=", dest)
 
@@ -184,7 +186,6 @@ func (c *TCPClient) startHeartbeat() {
 			}
 
 			time.Sleep(time.Millisecond * 500)
-
 			if staton {
 				//отправка инф-пакета в КП и прием ответа
 				inf := NewVikingFrameInf(dest, c.id, data)
@@ -204,14 +205,15 @@ func (c *TCPClient) startHeartbeat() {
 			}
 
 			dest++
-			if dest > CLIENTS { //TotalScore {
-				dest = 2
-				// c.say("------------ dest")
+			if dest > AMOUNT_KP {
+				dest = 1
+				c.say("------------ dest")
 			}
-			time.Sleep(time.Millisecond * 500)
+			time.Sleep(time.Millisecond * 5000)
 
 		} else {
-			time.Sleep(time.Millisecond * 30000)
+
+			time.Sleep(time.Millisecond * 10000)
 
 			//отправка пинга и прием понга
 			pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
@@ -229,19 +231,20 @@ func (c *TCPClient) startHeartbeat() {
 					break
 				}
 			}
-
 		}
-
 	}
 }
 
 func (c *TCPClient) Receive(dataChan chan string) {
 	pref := "receive"
 	for {
-		bb, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
+		bb, reto, err := ReadPac(c.conn, c.Reader, 0) //ждать без таймаута
 		if err != nil {
 			c.sayError(pref, err)
 			return
+		}
+		if reto {
+			continue
 		}
 		rxf := NewVikingFrameRx(bb)
 

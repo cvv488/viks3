@@ -82,32 +82,33 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 // если указан timeoutms ждем первые 2 байта с этим таймаутом, но следующие байты всегда дочитываются с таймаутом 5с
 // Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
 // TODO пофиксить ситуации когда пришло не ожидаемое количество байт
-func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error) {
+// возвращает тело пакета без LEN[2], true-выход по таймауту
+func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, error) {
 	const pref = "ReadPac:"
 	//установка тамаута
 	if timeoutms > 0 {
 		timeout := time.Duration(timeoutms) * time.Millisecond
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil { //не одноразовый
-			return nil, fmt.Errorf("%v setTimeout: %v", pref, err)
+			return nil, false, fmt.Errorf("%v setTimeout: %v", pref, err)
 		}
 	} else {
 		//бесконечный таймаут 'conn.SetReadDeadline(time.Time{})' не все реализации поддерживают
 		// if err := conn.SetReadDeadline(time.Now().Add(100 * 365 * 24 * time.Hour)); err != nil { уст на 100лет
 		if err := conn.SetReadDeadline(time.Date(3000, time.January, 1, 0, 0, 0, 0, time.UTC)); err != nil { //3000 год - без вычислений
-			return nil, fmt.Errorf("%v setTimeout2: %v", pref, err)
+			return nil, false, fmt.Errorf("%v setTimeout2: %v", pref, err)
 		}
 	}
 	// чтение длины пакета[2]
 	lenb, err := reader.Peek(2) //если в буфере нет - будет ждать 2 байта
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return nil, fmt.Errorf("%v timeout", pref)
+			return nil, true, nil //fmt.Errorf("%v timeout", pref)
 		}
-		return nil, fmt.Errorf("%v peek: %v", pref, err)
+		return nil, false, fmt.Errorf("%v peek: %v", pref, err)
 	}
 	_, err = reader.Discard(2)
 	if err != nil {
-		return nil, fmt.Errorf("%v discard: %v", pref, err)
+		return nil, false, fmt.Errorf("%v discard: %v", pref, err)
 	}
 
 	//и чтение тела пакета с дедлайном
@@ -116,34 +117,34 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, error)
 		//очистить буфер
 		available := reader.Buffered()
 		reader.Discard(available)
-		return nil, fmt.Errorf("%v bad short pac", pref)
+		return nil, false, fmt.Errorf("%v bad short pac", pref)
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
-		return nil, fmt.Errorf("%v setTimeout2: %v", pref, err)
+		return nil, false, fmt.Errorf("%v setTimeout2: %v", pref, err)
 	}
 
-	//TODO попытка пофиксить если пришло не ожидаемое количество байт - ошибка "bufio: buffer full"
+	//TODO попытка пофиксить если пришло не ожидаемое количество байт
+	//при попытке прочитать больше байт чем есть в буфере даст ошибку "bufio: buffer full"
 	time.Sleep(time.Millisecond) //1мс на всякий случай
 	available := reader.Buffered()
 	if available < length {
 		reader.Discard(available)
-		return nil, fmt.Errorf("available:%v < length:%v", available, length)
+		return nil, false, fmt.Errorf("available:%v < length:%v", available, length)
 		// возможно, стоит использовать другой подход
 	}
 
 	result, err := reader.Peek(length)
 	if err != nil {
-		//при попытке прочитать больше байт чем есть в буфере даст ошибку "bufio: buffer full"
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return nil, fmt.Errorf("%v timeout2", pref)
+			return nil, false, fmt.Errorf("%v timeout2", pref)
 		}
-		return nil, fmt.Errorf("%v peek2: %v", pref, err)
+		return nil, false, fmt.Errorf("%v peek2: %v", pref, err)
 	}
 	_, err = reader.Discard(length)
 	if err != nil {
-		return nil, fmt.Errorf("%v discard2: %v", pref, err)
+		return nil, false, fmt.Errorf("%v discard2: %v", pref, err)
 	}
-	return result, nil
+	return result, false, nil
 }
 
 func Send(bb []byte, conn net.Conn, writer *bufio.Writer, timeoutms int) error {

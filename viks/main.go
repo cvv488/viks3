@@ -15,7 +15,7 @@ import (
 var timeter time.Time
 
 const (
-	APP_INFO = "Viking Server v1.6"
+	APP_INFO = "Viking Server v0.6"
 )
 
 func main() {
@@ -97,9 +97,13 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	clearBufferSafe(reader, 4096)
 
 	//ждем аутентификацию с таймаутом
-	bb, err := ReadPac(conn, reader, srv.config.WaitReg)
+	bb, reto, err := ReadPac(conn, reader, srv.config.WaitReg)
 	if err != nil {
-		sayError("не дождался пакет регистрации", err)
+		sayError("authenticateClient", err)
+		return
+	}
+	if reto {
+		sayError1("не дождался пакет регистрации")
 		return
 	}
 	vf := NewVikingFrameRx(bb)
@@ -172,13 +176,14 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 
 	client := &Client{
-		Id:       pointId,
-		ids:      pids,
-		Info:     info,
-		Conn:     conn,
-		Writer:   writer,
-		Reader:   reader,
-		LastPing: time.Now(),
+		Id:        pointId,
+		ids:       pids,
+		Info:      info,
+		Conn:      conn,
+		Writer:    writer,
+		Reader:    reader,
+		KaTimeout: srv.config.KeepAliveTimeout,
+		// LastLive: time.Now(),
 	}
 	srv.register <- client
 	client.handleClient(srv)
@@ -202,9 +207,13 @@ func (c *Client) handleClient(s *ConnectionServer) {
 
 	count := 0
 	for {
-		bb, err := ReadPac(c.Conn, c.Reader, 0) //ждать без таймаута
+		bb, reto, err := ReadPac(c.Conn, c.Reader, c.KaTimeout) //ждать с KeepAliveTimeout
 		if err != nil {
 			c.sayError(pref, err)
+			return
+		}
+		if reto {
+			c.say("Close keep-alive timeout") //принудительное отключение молчащего клиента
 			return
 		}
 		count++
