@@ -77,12 +77,11 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 	return data, nil
 }
 
-// вычитывает и возвращает тело пакета без LEN[2]
+// вычитывает и возвращает пакет без LEN[2], re true-выход по таймауту
 // быстрый - без аллокаций и внешнего буфера
 // если указан timeoutms ждем первые 2 байта с этим таймаутом, но следующие байты всегда дочитываются с таймаутом 5с
 // Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
 // TODO пофиксить ситуации когда пришло не ожидаемое количество байт
-// возвращает тело пакета без LEN[2], true-выход по таймауту
 func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, error) {
 	const pref = "ReadPac:"
 	//установка тамаута
@@ -111,7 +110,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, 
 		return nil, false, fmt.Errorf("%v discard: %v", pref, err)
 	}
 
-	//и чтение тела пакета с дедлайном
+	//и чтение остатка пакета с дедлайном
 	length := IHL(lenb) + 2 // осталось принять lenb+2crc
 	if length < 3 {
 		//очистить буфер
@@ -133,7 +132,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, 
 		// возможно, стоит использовать другой подход
 	}
 
-	result, err := reader.Peek(length)
+	buf2, err := reader.Peek(length)
 	if err != nil {
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 			return nil, false, fmt.Errorf("%v timeout2", pref)
@@ -144,6 +143,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, 
 	if err != nil {
 		return nil, false, fmt.Errorf("%v discard2: %v", pref, err)
 	}
+	result := append(lenb, buf2...)
 	return result, false, nil
 }
 
@@ -165,13 +165,13 @@ func Send(bb []byte, conn net.Conn, writer *bufio.Writer, timeoutms int) error {
 }
 
 // только помещает в буфер для последующей отправки (для поля LEN)
-func SendFirst(bb []byte, writer *bufio.Writer) error {
-	_, err := writer.Write(bb)
-	if err != nil {
-		return fmt.Errorf("SendFirst_write: %v", err)
-	}
-	return nil
-}
+// func SendFirst(bb []byte, writer *bufio.Writer) error {
+// 	_, err := writer.Write(bb)
+// 	if err != nil {
+// 		return fmt.Errorf("SendFirst_write: %v", err)
+// 	}
+// 	return nil
+// }
 
 // преобразует HEX‑строку с любыми разделителями в []byte
 func HexToBuf(hexStr string) ([]byte, error) {

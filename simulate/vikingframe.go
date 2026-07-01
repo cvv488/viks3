@@ -1,5 +1,9 @@
 package main
 
+import (
+	"errors"
+)
+
 /*
 Формат сообщений
 
@@ -41,6 +45,9 @@ const (
 	OPT_NETID = 0x52 //Сетевой идентификатор клиента (NetID)
 	// 0x53 Список идентификаторов
 	OPT_STAT = 0x55 //Статус клиента (len=1!)
+	OPT_USER = 0x56 //Логин
+	OPT_PASW = 0x57 //Пароль
+
 	// 0x00 – неизвестный статус
 	// 0х01 – гостевой доступ *
 	// 0x02 – отключен
@@ -48,9 +55,6 @@ const (
 	// 0x04 – аутентифицирован *
 	// 0x05 – такой PointID уже занят
 	// 0x06 – ошибка аутентификации
-
-	OPT_USER = 0x56 //Логин
-	OPT_PASW = 0x57 //Пароль
 )
 
 type VikingFrame struct {
@@ -59,7 +63,6 @@ type VikingFrame struct {
 	msgid           byte
 	txb             []byte
 	body            []byte
-	// len int  //uint16
 	// options []Option //[]byte
 	// crc int //uint16
 }
@@ -90,24 +93,33 @@ func (vf *VikingFrame) EndTx() {
 	vf.txb[0] = byte(lenp >> 8)
 	vf.txb[1] = byte(lenp)
 	hi, lo := Crc(vf.txb)
-	vf.txb = append(vf.txb, hi)
 	vf.txb = append(vf.txb, lo)
+	vf.txb = append(vf.txb, hi)
 }
 
-//создает на основе пришедших байт
-func NewVikingFrameRx(rxb []byte) *VikingFrame {
+// создает на основе пришедших байт
+// test crc: ss := "00-0E-80-00-00-00-00-21-52-02-01-96-55-01-04-FF-52-F0"; bb, _ := HexToBuf(ss)
+func NewVikingFrameRx(bb []byte) (*VikingFrame, error) {
+	if len(bb) < 9 {
+		return nil, errors.New("short_frx")
+	}
+	rxb := bb[:len(bb)-2] //без crc
+	hi, lo := Crc(rxb)
+	if hi != bb[len(bb)-1] || lo != bb[len(bb)-2] {
+		return nil, errors.New("crc")
+	}
 	vf := VikingFrame{
-		tid:     rxb[0],
-		destadr: IHL(rxb[1:3]),
-		srcadr:  IHL(rxb[3:5]),
+		tid:     rxb[2],
+		destadr: IHL(rxb[3:5]),
+		srcadr:  IHL(rxb[5:7]),
 	}
 	if vf.tid == TSLUG {
-		vf.msgid = rxb[5]
-		vf.body = rxb[6:]
+		vf.msgid = rxb[7]
+		vf.body = rxb[8:]
 	} else {
-		vf.body = rxb[5:]
+		vf.body = rxb[7:]
 	}
-	return &vf
+	return &vf, nil
 }
 
 func (vf *VikingFrame) AddOption(code byte, vv string) {
@@ -133,7 +145,7 @@ func (vf *VikingFrame) AddOptionByte(code byte, vv byte) {
 func (vf *VikingFrame) GetOptions() map[int]Option {
 	opts := map[int]Option{}
 	pos := 0
-	for pos < len(vf.body)-1 {
+	for pos < len(vf.body)-1 { //-1 0xff unused
 		code := vf.body[pos]
 		if code == 0xff {
 			break
@@ -148,7 +160,7 @@ func (vf *VikingFrame) GetOptions() map[int]Option {
 	return opts
 }
 
-//информационный пакет
+// информационный пакет
 func NewVikingFrameInf(dest, src int, data []byte) *VikingFrame {
 	var txb []byte
 	txb = append(txb, BHL(len(data)+5)...) //LEN
@@ -157,20 +169,13 @@ func NewVikingFrameInf(dest, src int, data []byte) *VikingFrame {
 	txb = append(txb, BHL(src)...)
 	txb = append(txb, data...)
 	hi, lo := Crc(txb)
-	txb = append(txb, hi)
 	txb = append(txb, lo)
+	txb = append(txb, hi)
 	return &VikingFrame{
 		txb: txb,
 	}
 }
 
-// dd := "00-2C-80-00-00-00-00 20 50inf-11-(54-4D-44-52-56-20-76-2E-33-2E-39-2E-31-2E-31-33-39-)	51pid-02-(01-01-)	56-05-(41-64-6D-69-6E-)	57-05-(61-64-6D-69-6E-)	FF"
-// //-	3E-EB"
-// bb,_ := HexToBuf(dd)
-// fmt.Println(BufToHex(bb))
-// vf.buffer=bb
-// crc:= CRC(bb)
-// fmt.Printf("%X", crc)
 func Crc(bb []byte) (hi byte, lo byte) {
 	if len(bb) > 0 {
 		var data uint16
@@ -189,74 +194,6 @@ func Crc(bb []byte) (hi byte, lo byte) {
 		crc = ^crc
 		hi = byte(crc >> 8)
 		lo = byte(crc)
-		// vf.txb = append(vf.txb, byte(crc>>8))
-		// vf.txb = append(vf.txb, byte(crc))
 	}
 	return
 }
-
-// func (vf *VikingFrame) Add(ii int) { //HL
-// 	vf.buffer = append(vf.buffer, byte(ii>>8))
-// 	vf.buffer = append(vf.buffer, byte(ii))
-// }
-
-// func (vf *VikingFrame) GetBytes() {
-// 	vf.Add(0) //len
-// 	vf.buffer = append(vf.buffer, vf.ts)
-// 	vf.Add(vf.destadr)
-// 	vf.Add(vf.srcadr)
-// 	vf.buffer = append(vf.buffer, vf.msgid)
-// 	for _, op := range vf.options {
-// 		vf.buffer = append(vf.buffer, op.code)
-// 		vf.buffer = append(vf.buffer, op.len)
-// 		vf.buffer = append(vf.buffer, op.body...)
-// 	}
-// 	vf.buffer = append(vf.buffer, 0xff) //mark end opts
-// 	vf.buffer[0] = byte(len(vf.buffer) >> 8)
-// 	vf.buffer[1] = byte(len(vf.buffer))
-
-// 	// bb := []byte{0, 0, 0, 0, 0, 0} //header
-// 	// for _, op := range vf.options {
-// 	// 	bb = append(bb, op.code)
-// 	// 	bb = append(bb, op.len)
-// 	// 	bb = append(bb, op.body...)
-// 	// }
-// 	// bb[2] = vf.ts
-// 	// BHL(vf.destadr)
-// 	// return bb
-// }
-
-// send vf.txb
-// func (vf *VikingFrame) Send(writer *bufio.Writer) error {
-// 	_, err := writer.Write(vf.txb)
-// 	if err != nil {
-// 		return fmt.Errorf("SendWrite: %v", err)
-// 	}
-// 	if err = writer.Flush(); err != nil {
-// 		return fmt.Errorf("SendFlush: %v", err)
-// 	}
-// 	return nil
-// }
-
-// read to vf.buffer
-// func (vf *VikingFrame) Read(r *bufio.Reader) (err error) {
-// lenPac, err := r.ReadByte()
-// if err != nil {
-// 	return err
-// }
-// if lenPac == 0 {
-// 	return fmt.Errorf("ReadEmpty")
-// }
-// _, err = io.ReadFull(r, vf.buffer[2:lenPac+4]) //len+crc
-// if err != nil {
-// 	return fmt.Errorf("не удалось прочитать пакет: %w", err)
-// }
-// vf.buffer[0] = byte(len(vf.buffer) >> 8)
-// vf.buffer[1] = byte(len(vf.buffer))
-// vf.rxb = vf.buffer[:nb] //re без crc
-// crchi, crclo := Crc(vf.buffer)
-// if crchi != vf.buffer[]
-// return nil
-
-// 	return buffer[dataStart:crcStart], nil
-// }

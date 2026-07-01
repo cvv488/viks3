@@ -22,12 +22,12 @@ func main() {
 	msg := "===== START " + APP_INFO + " ====="
 	defer say("===== STOP " + APP_INFO + " =====")
 
-	//сначала настройка логера с загрузкой конфигурации
+	//сначала загрузка конфигурации и настройка логера
 	config, err := LoadConfig("config.json")
 	if err != nil {
 		log.Fatal(err)
 	}
-	LogSetup(config.Logs)
+	LogSetup(config.LogMode, config.LogDir)
 	say(msg)
 
 	// Загружаем учётные данные
@@ -106,7 +106,11 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		sayError1("не дождался пакет регистрации")
 		return
 	}
-	vf := NewVikingFrameRx(bb)
+	vf, err := NewVikingFrameRx(bb)
+	if err != nil {
+		sayError("authenticateClient", err)
+		return
+	}
 	if vf.msgid != MID_QREG {
 		sayError1("это не пакет регистрации")
 		return
@@ -183,7 +187,6 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		Writer:    writer,
 		Reader:    reader,
 		KaTimeout: srv.config.KeepAliveTimeout,
-		// LastLive: time.Now(),
 	}
 	srv.register <- client
 	client.handleClient(srv)
@@ -217,7 +220,11 @@ func (c *Client) handleClient(s *ConnectionServer) {
 			return
 		}
 		count++
-		vf := NewVikingFrameRx(bb)
+		vf, err := NewVikingFrameRx(bb)
+		if err != nil {
+			c.sayError("handleClient", err)
+			continue //return
+		}
 		switch vf.tid {
 		case TSLUG:
 			switch vf.msgid {
@@ -271,7 +278,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 			}
 
 		case TINFO:
-			//информационный пакет перенаправить по назначению
+			//информационный пакет отправить по назначению
 			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
 			rm := RouteMessage{Dest: vf.destadr, Data: bb}
 			s.routecast <- rm
@@ -315,16 +322,7 @@ func (srv *ConnectionServer) handleEvents() {
 			}
 			srv.mutex.RUnlock()
 			if ok {
-				//восстановить поле LEN в отправку, crc должен совпасть
-				lenb := BHL(len(message.Data) - 2)
-				err := SendFirst(lenb, cli.Writer)
-				if err != nil {
-					cli.sayError("routecast", err)
-					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
-					return
-				}
-
-				err = Send(message.Data, cli.Conn, cli.Writer, srv.config.Timeout)
+				err := Send(message.Data, cli.Conn, cli.Writer, srv.config.Timeout)
 				if err != nil {
 					cli.sayError("routecast", err)
 					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
@@ -377,7 +375,6 @@ func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ошибка парсинга учётных данных: %v", err)
 	}
-
 	return credentials, nil
 }
 

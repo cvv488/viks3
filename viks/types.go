@@ -25,7 +25,8 @@ type ServerConfig struct {
 	MaxConnections   int    `json:"max_connections"`
 	WaitReg          int    `json:"wait_reg"`           //ожидание пакета регистрации, мс
 	Timeout          int    `json:"timeout"`            //read/write timeout, мс
-	Logs             string `json:"logs"`               //включение логов - папка логов
+	LogMode          string `json:"logmode"`            //режим  логов
+	LogDir           string `json:"logdir"`             //папка логов
 	KeepAliveTimeout int    `json:"keep_alive_timeout"` //отключить молчащий объект спустя таймаут, мс
 	Debug1           int    `json:"debug1"`
 }

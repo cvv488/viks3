@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	AMOUNT_KP = 5
-	AMOUNT_PU = 5
+	AMOUNT_KP = 10
+	AMOUNT_PU = 10
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -112,7 +112,12 @@ func (c *TCPClient) Start() {
 		c.sayError("read status", err)
 		return
 	}
-	rxf := NewVikingFrameRx(bb)
+	rxf, err := NewVikingFrameRx(bb)
+	if err != nil {
+		c.sayError("read status", err)
+		c.sayError("handleClient", err)
+		return
+	}
 	if rxf.msgid != MID_AREG {
 		c.sayError("-> no status21", nil)
 		return
@@ -246,7 +251,11 @@ func (c *TCPClient) Receive(dataChan chan string) {
 		if reto {
 			continue
 		}
-		rxf := NewVikingFrameRx(bb)
+		rxf, err := NewVikingFrameRx(bb)
+		if err != nil {
+			c.sayError("receive", err)
+			continue
+		}
 
 		switch rxf.tid {
 		case TSLUG:

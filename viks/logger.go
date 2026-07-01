@@ -1,7 +1,11 @@
 package main
 
 import (
-	stdlog "log"
+	"io"
+	"strconv"
+	"strings"
+
+	// stdlog "log"
 	"os"
 	"path/filepath"
 
@@ -13,21 +17,6 @@ import (
 )
 
 /*
-// Базовое логирование
-
-	log.Info().Msg("Приложение запущено")
-	log.Warn().Msg("Предупреждение: низкий уровень памяти")
-	log.Error().Msg("Критическая ошибка")
-
-
-	rotationWriter := &lumberjack.Logger{
-		Filename:   "/var/log/myapp/app.log",
-		MaxSize:    100,    // МБ до ротации
-		MaxBackups: 7,     // количество старых файлов
-		MaxAge:     28,   // дней хранения
-		Compress:   true,  // сжатие старых файлов
-	}
-
 	// Создаём логгер с ротацией
 	logger := zerolog.New(rotationWriter).
 		With().
@@ -42,39 +31,66 @@ import (
 	log.Debug().Str("method", "GET").Str("path", "/api/users").Msg("HTTP запрос")
 */
 
-func LogSetup(logDir string) {
+func LogSetup(mode, logDir string) error {
 
-	// Временный вывод в stderr на случай ошибки
-	stdlog.SetOutput(os.Stderr)
-	var logFile *os.File
-
-	// logDir = "" //tst
-	if logDir != "" {
-		//создать файл лога
-		err := os.MkdirAll(logDir, 0755)
-		if err != nil {
-			stdlog.Fatalln("Не удалось создать директорию для логов:", logDir)
-		}
-		logFile, err = os.OpenFile(filepath.Join(logDir, "viksrv.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			stdlog.Fatalln("Не удалось создать файл для логов:", err)
-		}
+	modes := strings.Split(mode, ",")
+	switch modes[0] {
+	case "1": //в файл
+	case "2":
+		logDir = "" //в консоль
+	default:
+		return nil //по умолчанию
 	}
-
-	// Настраиваем zerolog
-	// Установка глобального уровня логирования
-	zerolog.SetGlobalLevel(zerolog.InfoLevel) //Устанавливаем уровень логирования: INFO + WARN, ERROR, FATAL
-
-	// Настройка формата времени
-	zerolog.TimeFieldFormat = "2006-01-02 15:04:05"
-	// zerolog.TimeFieldFormat = zerolog.TimeFormatUnix // Unix timestamp
-
-	if logFile != nil {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: logFile})
+	var w io.Writer
+	timeFormat := "2006-01-02 15:04:05"
+	if logDir == "" {
+		if len(modes) > 2 && modes[2] == "j" { //JSON
+			w = os.Stdout
+		} else {
+			// Консоль: цветной, читаемый формат
+			w = zerolog.ConsoleWriter{
+				Out:        os.Stdout,
+				TimeFormat: timeFormat,
+				NoColor:    false, // цвета включены
+				// LevelFormat:   "%s",                 // можно кастомизировать
+				// MessageFormat: "%s",
+			}
+		}
 	} else {
-		//в консоль без json
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			return err
+		}
+		path := filepath.Join(logDir, "app.log")
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+
+		if len(modes) > 2 && modes[2] == "j" {
+			w = file //JSON
+		} else {
+			w = zerolog.ConsoleWriter{
+				Out:        file,
+				TimeFormat: timeFormat,
+				NoColor:    true, // в файле цвета не нужны
+			}
+		}
 	}
+
+	logger := zerolog.New(w).With().Timestamp().Logger()
+
+	// Установка глобального уровня логирования
+	level := int(zerolog.DebugLevel) //0-DEBUG 1-INFO 2-WARN 3-ERROR 4-FATAL 5-PANIC 6-NO -1-TRACE
+	if len(modes) > 1 {
+		number, err := strconv.Atoi(modes[1])
+		if err == nil {
+			level = number
+		}
+	}
+	logger = logger.Level(zerolog.Level(level))
+
+	log.Logger = logger
+	return nil
 }
 
 func say(msg string) {
