@@ -72,7 +72,7 @@ func (srv *ConnectionServer) Start() {
 		if srv.connectionCount >= srv.config.MaxConnections {
 			srv.mutex.Unlock()
 			conn.Close()
-			say("Сервер перегружен. Попробуйте позже")
+			sayW("Сервер перегружен. Попробуйте позже")
 			continue
 		}
 		srv.connectionCount++
@@ -103,7 +103,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		return
 	}
 	if reto {
-		sayError1("не дождался пакет регистрации")
+		sayW("выход, не дождался пакет регистрации")
 		return
 	}
 	vf, err := NewVikingFrameRx(bb)
@@ -112,14 +112,14 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		return
 	}
 	if vf.msgid != MID_QREG {
-		sayError1("это не пакет регистрации")
+		sayW("отказано, это не пакет регистрации")
 		return
 	}
 	opts := vf.GetOptions()
 	//по полученному pointId найти его в списке разрешенных (в конфигурации)
 	op, ok := opts[OPT_PID]
 	if ok != true {
-		sayError1("в пакете регистрации нет pointId")
+		sayW("отказано, в пакете регистрации нет pointId")
 		return
 	}
 	pointId := IHL(op.Body)
@@ -134,28 +134,28 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 			}
 		}
 		if cre == nil {
-			say(pids + ": запрещен")
+			sayW(pids + ": отказано, клиент отсутствует в списке")
 			return
 		}
 		//проверить логин и пароль если есть
 		if cre.Username != "" {
 			if op, ok := opts[OPT_USER]; ok != true {
-				say(pids + ": в пакете регистрации нет user")
+				sayW(pids + ": отказано, в пакете регистрации нет user")
 				return
 			} else {
 				if cre.Username != string(op.Body) {
-					say(pids + ": не верный user")
+					sayW(pids + ": отказано, не верный user")
 					return
 				}
 			}
 		}
 		if cre.Password != "" {
 			if op, ok := opts[OPT_PASW]; ok != true {
-				say(pids + ": в пакете регистрации нет password")
+				sayW(pids + ": отказано, в пакете регистрации нет password")
 				return
 			} else {
 				if cre.Password != string(op.Body) {
-					say(pids + ": не верный password")
+					sayW(pids + ": отказано, не верный password")
 					return
 				}
 			}
@@ -216,7 +216,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 			return
 		}
 		if reto {
-			c.say("Close keep-alive timeout") //принудительное отключение молчащего клиента
+			c.sayW("Close keep-alive timeout") //принудительное отключение молчащего клиента
 			return
 		}
 		count++
@@ -273,8 +273,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 					c.sayError("send unsupport", err)
 					return
 				}
-				c.say("<- unsupport")
-				c.sayError1(fmt.Sprintf("-> bad msgid=0x%02X", vf.msgid))
+				c.sayW(fmt.Sprintf("-> bad msgid=0x%02X <- unsupport", vf.msgid))
 			}
 
 		case TINFO:
@@ -287,7 +286,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 			c.say(fmt.Sprintf("==> spor to %v", vf.destadr))
 
 		default:
-			c.sayError1(fmt.Sprintf("~~> unknown tid=%v", vf.tid))
+			c.sayW(fmt.Sprintf("~~> unknown tid=%v", vf.tid))
 		}
 	}
 }
@@ -317,8 +316,8 @@ func (srv *ConnectionServer) handleEvents() {
 			srv.mutex.RLock()
 			if cli, ok = srv.clients[message.Dest]; ok == true { //клиент Dest есть
 			} else {
-				say(fmt.Sprintf("No route: Bad Dest %v", message.Dest))
-				//todo отправить резерным клиентам
+				sayW(fmt.Sprintf("No route: Bad Dest %v", message.Dest))
+				//todo отправить резервным клиентам
 			}
 			srv.mutex.RUnlock()
 			if ok {

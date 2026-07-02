@@ -65,6 +65,9 @@ func (cli *Client) sayError(msg string, err error) {
 func (cli *Client) sayError1(msg string) {
 	sayError1(cli.ids + ": " + msg)
 }
+func (cli *Client) sayW(msg string) {
+	sayW(cli.ids + ": " + msg)
+}
 
 // Создаёт новый сервер соединений с загрузкой конфигурации
 func NewConnectionServer(config *ServerConfig, authFile string) (*ConnectionServer, error) {

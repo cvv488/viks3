@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	AMOUNT_KP = 10
-	AMOUNT_PU = 10
+	AMOUNT_KP = 2 //id начинается с 1
+	AMOUNT_PU = 1 //id начинается с 1001
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -216,7 +216,7 @@ func (c *TCPClient) startHeartbeat() {
 			}
 			time.Sleep(time.Millisecond * 5000)
 
-		} else {
+		} else { // KP:
 
 			time.Sleep(time.Millisecond * 10000)
 
@@ -236,6 +236,16 @@ func (c *TCPClient) startHeartbeat() {
 					break
 				}
 			}
+
+			//отправка спорадического пакета от КП
+			time.Sleep(time.Millisecond * 1000)
+			inf := NewVikingFrameSpor(0, c.id, data)
+			if err := c.Send(inf.txb); err != nil {
+				c.sayError("send spor", err)
+				return
+			}
+			c.say("<- spor")
+
 		}
 	}
 }

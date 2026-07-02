@@ -96,6 +96,9 @@ func LogSetup(mode, logDir string) error {
 func say(msg string) {
 	log.Info().Msg(msg)
 }
+func sayW(msg string) {
+	log.Warn().Msg(msg) //todo other Levels
+}
 
 // ошибка с контекстом
 func sayError(msg string, err error) {
