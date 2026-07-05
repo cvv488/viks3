@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -31,21 +32,24 @@ import (
 	log.Debug().Str("method", "GET").Str("path", "/api/users").Msg("HTTP запрос")
 */
 
-func LogSetup(mode, logDir string) error {
+func LogSetup(mode, logDir string) (string, error) {
 
+	restr := "Logger mode: "
 	modes := strings.Split(mode, ",")
 	switch modes[0] {
 	case "1": //в файл
 	case "2":
 		logDir = "" //в консоль
 	default:
-		return nil //по умолчанию
+		return restr + "Default", nil //по умолчанию
 	}
 	var w io.Writer
 	timeFormat := "2006-01-02 15:04:05"
 	if logDir == "" {
+		restr += "Вывод в консоль "
 		if len(modes) > 2 && modes[2] == "j" { //JSON
 			w = os.Stdout
+			restr += "json-mode "
 		} else {
 			// Консоль: цветной, читаемый формат
 			w = zerolog.ConsoleWriter{
@@ -57,17 +61,19 @@ func LogSetup(mode, logDir string) error {
 			}
 		}
 	} else {
+		restr += "Вывод в файл "
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
-			return err
+			return "", err
 		}
 		path := filepath.Join(logDir, "app.log")
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		if len(modes) > 2 && modes[2] == "j" {
 			w = file //JSON
+			restr += "json-mode "
 		} else {
 			w = zerolog.ConsoleWriter{
 				Out:        file,
@@ -87,10 +93,11 @@ func LogSetup(mode, logDir string) error {
 			level = number
 		}
 	}
+	restr += fmt.Sprintf("level=%d", level)
 	logger = logger.Level(zerolog.Level(level))
 
 	log.Logger = logger
-	return nil
+	return restr, nil
 }
 
 func say(msg string) {

@@ -176,6 +176,22 @@ func NewVikingFrameInf(dest, src int, data []byte) *VikingFrame {
 	}
 }
 
+// спорадический пакет
+func NewVikingFrameSpor(dest, src int, data []byte) *VikingFrame {
+	var txb []byte
+	txb = append(txb, BHL(len(data)+5)...) //LEN
+	txb = append(txb, TSPOR)
+	txb = append(txb, BHL(dest)...)
+	txb = append(txb, BHL(src)...)
+	txb = append(txb, data...)
+	hi, lo := Crc(txb)
+	txb = append(txb, lo)
+	txb = append(txb, hi)
+	return &VikingFrame{
+		txb: txb,
+	}
+}
+
 func Crc(bb []byte) (hi byte, lo byte) {
 	if len(bb) > 0 {
 		var data uint16

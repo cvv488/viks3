@@ -5,21 +5,30 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "viks",
+            "name": "viks_Terminal",
             "type": "go",
             "request": "launch",
-            "mode": "auto",
-            // "program": "${fileDirname}"
-             "program": "${workspaceFolder}/viks",
+            "mode": "debug",
+            "program": "${workspaceFolder}/viks",
+            // "program": "${fileDirname}",
+            // "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal", // ← вот ключевое!
+            "args": []
         },
-                {
+        {
+            "name": "viks_NoTerminal",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/viks",
+        },
+        {
             "name": "simu",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             // "program": "${fileDirname}"
-             "program": "${workspaceFolder}/simulate",
+            "program": "${workspaceFolder}/simulate",
         }
-
     ]
 }

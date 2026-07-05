@@ -2,20 +2,21 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"time"
+	"strings"
+	"sync"
 )
 
-var timeter time.Time
-
 const (
-	APP_INFO = "Viking Server v0.6"
+	APP_INFO = "Viking Server v0.7"
 )
 
 func main() {
@@ -27,8 +28,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	LogSetup(config.LogMode, config.LogDir)
+	lm, err := LogSetup(config.LogMode, config.LogDir)
 	say(msg)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	say(lm)
 
 	// Загружаем учётные данные
 	server, err := NewConnectionServer(config, "auth.json")
@@ -37,49 +43,114 @@ func main() {
 		return
 	}
 
-	go func() {
-		// Обработка прерывания (Ctrl+C)
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt)
-		<-sigChan
-		say("Получен сигнал завершения, останавливаем сервер...")
-		server.Stop()
-	}()
-
 	server.Start()
+	server.Stop()
 }
 
 func (srv *ConnectionServer) Start() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	// Горутина CLI: читает строки через bufio.Reader
+	go func() {
+		defer wg.Done()
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			// Сначала проверяем контекст, чтобы не делать блокирующий вызов, если уже пора выходить
+			if ctx.Err() != nil {
+				fmt.Println("ctx.Done() в stdin — выход")
+				return
+			}
+
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					fmt.Println("EOF — выход")
+					return
+				}
+				fmt.Printf("read err: %v\n", err)
+				continue
+			}
+
+			// line содержит '\n' в конце, можно обрезать
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				continue // пустой ввод (просто Enter)
+			}
+
+			fmt.Printf(">> Введена строка: %s\n", line)
+		}
+	}()
+
+	// подписка на SIGINT (Ctrl+C)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	// signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		say("Получен Ctrl+C, остановка сервера...")
+		cancel()
+	}()
+	// go func() {
+	// 	for {
+	// 		fmt.Print("* ")
+	// 		time.Sleep(1 * time.Second)
+	// 	}
+	// }()
+
+	// Запуск listener
 	listener, err := net.Listen("tcp", ":"+srv.config.Port)
 	if err != nil {
 		sayError("Ошибка при запуске сервера", err)
+		return
 	}
-	defer listener.Close()
+	srv.listener = listener
+	defer func() {
+		_ = listener.Close()
+		srv.listener = nil
+	}()
 	say("Сервер запущен на порту " + srv.config.Port)
 
 	go srv.handleEvents()
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			sayError("Ошибка при принятии соединения", err)
-			continue
-		}
-		say("Новое подключение: " + conn.RemoteAddr().String())
+	// listener.Accept() блокирующий поэтому в отдельной горутине
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				if errors.Is(err, net.ErrClosed) { //Это нормальный стоп - listener закрыли
+					return
+				}
+				sayError("Accept error", err)
+				continue
+			}
 
-		// Проверяем лимит подключений
-		srv.mutex.Lock()
-		if srv.connectionCount >= srv.config.MaxConnections {
+			// Проверяем лимит подключений
+			srv.mutex.Lock()
+			if srv.connectionCount >= srv.config.MaxConnections {
+				srv.mutex.Unlock()
+				conn.Close()
+				sayW("Сервер перегружен, попробуйте позже. Новое подключение: " + conn.RemoteAddr().String())
+				continue
+			}
+			srv.connectionCount++
 			srv.mutex.Unlock()
-			conn.Close()
-			sayW("Сервер перегружен. Попробуйте позже")
-			continue
-		}
-		srv.connectionCount++
-		srv.mutex.Unlock()
+			say("Новое подключение: " + conn.RemoteAddr().String())
 
-		go srv.authenticateClient(conn)
-	}
+			go srv.authenticateClient(conn)
+		}
+	}()
+
+	// Основной цикл: только проверка ctx.Done()
+	<-ctx.Done()
+	fmt.Println("ctx.Done() — закрываем listener")
+	_ = listener.Close()
+	<-acceptDone
+	wg.Wait()
 }
 
 // Аутентификация клиента
@@ -124,9 +195,9 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 	}
 	pointId := IHL(op.Body)
 	pids := fmt.Sprintf("%04d", pointId)
+	var cre *AuthCredential
 	if srv.config.Debug1 == 1 { //debug - пускать всех
 	} else {
-		var cre *AuthCredential
 		for i, pid := range srv.credentials {
 			if pid.Id == pointId { //есть в списке
 				cre = &srv.credentials[i]
@@ -187,6 +258,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		Writer:    writer,
 		Reader:    reader,
 		KaTimeout: srv.config.KeepAliveTimeout,
+		spor:      cre.Spor,
 	}
 	srv.register <- client
 	client.handleClient(srv)
@@ -277,13 +349,14 @@ func (c *Client) handleClient(s *ConnectionServer) {
 			}
 
 		case TINFO:
-			//информационный пакет отправить по назначению
+			//информационный пакет отправить по destadr
 			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
 			rm := RouteMessage{Dest: vf.destadr, Data: bb}
 			s.routecast <- rm
 
 		case TSPOR:
-			c.say(fmt.Sprintf("==> spor to %v", vf.destadr))
+			c.say("==> spor")
+			// c.spor
 
 		default:
 			c.sayW(fmt.Sprintf("~~> unknown tid=%v", vf.tid))
@@ -335,7 +408,7 @@ func (srv *ConnectionServer) handleEvents() {
 
 // Останавливает сервер
 func (srv *ConnectionServer) Stop() {
-	srv.keepAliveTicker.Stop()
+	// srv.keepAliveTicker.Stop()
 	srv.mutex.Lock()
 	defer srv.mutex.Unlock()
 
@@ -399,3 +472,35 @@ func clearBufferSafe(reader *bufio.Reader, maxBytes int) error {
 	}
 	return fmt.Errorf("clearBufferSafe: превышен лимит очистки, прочитано %d байт", discarded)
 }
+
+// go func() {
+// 	defer wg.Done()
+// 	reader := bufio.NewReader(os.Stdin)
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			fmt.Println("ctx.Done() в stdin")
+// 			return
+// 		// case <-time.After(500 * time.Millisecond):
+// 		// 	continue // к регулярной проверке ctx при блокирующем ReadRune (в отличие от listener.Accept() в select блокируется)
+// 		default:
+// 			// line, _ := reader.ReadString('\n') тут не блокируется
+// 			// fmt.Println(">>", line)
+
+// 			r, _, err := reader.ReadRune()
+// 			if err != nil {
+// 				if errors.Is(err, io.EOF) {
+// 					fmt.Println("EOF — выход")
+// 					return
+// 				}
+// 				fmt.Printf("read err: %v\n", err)
+// 				continue
+// 			}
+// 			if r == '\r' || r == '\n' {
+// 				fmt.Println(">> Enter нажат!")
+// 				continue
+// 			}
+// 			fmt.Printf("Символ: %c\n", r)
+// 		}
+// 	}
+// }()
