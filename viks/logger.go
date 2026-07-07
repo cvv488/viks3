@@ -32,16 +32,18 @@ import (
 	log.Debug().Str("method", "GET").Str("path", "/api/users").Msg("HTTP запрос")
 */
 
-func LogSetup(mode, logDir string) (string, error) {
+func LogSetup(mode, logDir string) (restr string, consoleUse bool, err error) {
 
-	restr := "Logger mode: "
+	restr = "Logger mode: "
 	modes := strings.Split(mode, ",")
 	switch modes[0] {
 	case "1": //в файл
 	case "2":
+		consoleUse = true
 		logDir = "" //в консоль
 	default:
-		return restr + "Default", nil //по умолчанию
+		restr += "Default" //по умолчанию
+		return
 	}
 	var w io.Writer
 	timeFormat := "2006-01-02 15:04:05"
@@ -62,13 +64,14 @@ func LogSetup(mode, logDir string) (string, error) {
 		}
 	} else {
 		restr += "Вывод в файл "
-		if err := os.MkdirAll(logDir, 0o755); err != nil {
-			return "", err
+		if err = os.MkdirAll(logDir, 0o755); err != nil {
+			return
 		}
 		path := filepath.Join(logDir, "app.log")
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
-		if err != nil {
-			return "", err
+		file, err0 := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		if err0 != nil {
+			err = err0
+			return
 		}
 
 		if len(modes) > 2 && modes[2] == "j" {
@@ -86,7 +89,7 @@ func LogSetup(mode, logDir string) (string, error) {
 	logger := zerolog.New(w).With().Timestamp().Logger()
 
 	// Установка глобального уровня логирования
-	level := int(zerolog.DebugLevel) //0-DEBUG 1-INFO 2-WARN 3-ERROR 4-FATAL 5-PANIC 6-NO -1-TRACE
+	level := int(zerolog.DebugLevel) //0-DEBUG default, 1-INFO, 2-WARN, 3-ERROR, 4-FATAL, 5-PANIC, 6-NO, 1-TRACE
 	if len(modes) > 1 {
 		number, err := strconv.Atoi(modes[1])
 		if err == nil {
@@ -95,9 +98,8 @@ func LogSetup(mode, logDir string) (string, error) {
 	}
 	restr += fmt.Sprintf("level=%d", level)
 	logger = logger.Level(zerolog.Level(level))
-
 	log.Logger = logger
-	return restr, nil
+	return
 }
 
 func say(msg string) {

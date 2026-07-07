@@ -19,7 +19,7 @@
 - "wait_reg":10000,
 - "timeout": 10000,
 
--  "logmode": "1,j"
+-  "logmode": "1,0,j"
     - [0]: 1-лог в файл, 2-лог в консоль, иначе без настройки
     - [1]: меняет уровень логирования от Debug (0-DEBUG 1-INFO 2-WARN 3-ERROR 4-FATAL 5-PANIC 6-NO -1-TRACE)
     - [2]: "j"-лог в json-формате

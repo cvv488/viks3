@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -28,13 +29,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	lm, err := LogSetup(config.LogMode, config.LogDir)
+	logstr, cu, err := LogSetup(config.LogMode, config.LogDir)
 	say(msg)
+	if !cu {
+		fmt.Println(msg)
+	}
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
-	say(lm)
+	say(logstr)
+	if !cu {
+		fmt.Println(logstr)
+	}
 
 	// Загружаем учётные данные
 	server, err := NewConnectionServer(config, "auth.json")
@@ -45,6 +52,7 @@ func main() {
 
 	server.Start()
 	server.Stop()
+	time.Sleep(2 * time.Second)
 }
 
 func (srv *ConnectionServer) Start() {
@@ -53,7 +61,7 @@ func (srv *ConnectionServer) Start() {
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	// Горутина CLI: читает строки через bufio.Reader
+	// CLI: читает строки через bufio.Reader / поодерживается история команд - стрелки вверх/вниз
 	go func() {
 		defer wg.Done()
 		reader := bufio.NewReader(os.Stdin)
@@ -63,7 +71,6 @@ func (srv *ConnectionServer) Start() {
 				fmt.Println("ctx.Done() в stdin — выход")
 				return
 			}
-
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				if errors.Is(err, io.EOF) {
@@ -73,21 +80,35 @@ func (srv *ConnectionServer) Start() {
 				fmt.Printf("read err: %v\n", err)
 				continue
 			}
-
-			// line содержит '\n' в конце, можно обрезать
-			line = strings.TrimRight(line, "\r\n")
+			line = strings.TrimRight(line, "\r\n") // line содержит '\n' в конце, можно обрезать
 			if line == "" {
 				continue // пустой ввод (просто Enter)
 			}
 
-			fmt.Printf(">> Введена строка: %s\n", line)
+			fmt.Printf(">>:  %s\n", line)
+			switch line {
+			case "help", "?":
+				fmt.Println("Help:")
+				fmt.Println(APP_INFO)
+			case "exit":
+				cancel()
+				return
+			case "list":
+				fmt.Println("-----------------------------------")
+				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
+				srv.mutex.RLock() //srv.mutex.Lock()
+				for id, client := range srv.clients {
+					fmt.Printf("[%d]\t%s, Conn=%v\n", id, client.Info, client.Conn.RemoteAddr())
+				}
+				srv.mutex.RUnlock()
+				fmt.Println("-----------------------------------")
+			}
 		}
 	}()
 
 	// подписка на SIGINT (Ctrl+C)
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-	// signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, os.Interrupt) // signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
 		say("Получен Ctrl+C, остановка сервера...")
@@ -145,11 +166,10 @@ func (srv *ConnectionServer) Start() {
 		}
 	}()
 
-	// Основной цикл: только проверка ctx.Done()
 	<-ctx.Done()
-	fmt.Println("ctx.Done() — закрываем listener")
+	fmt.Println("Exit — закрываем listener")
 	_ = listener.Close()
-	<-acceptDone
+	<-acceptDone // ждём, пока listener.Accept() завершится и изза Close
 	wg.Wait()
 }
 
@@ -162,8 +182,10 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		conn.Close()
 	}()
 
-	reader := bufio.NewReader(conn) //def buf 4k, writer := bufio.NewWriterSize(conn, 8192) // буфер 8 КБ
-	writer := bufio.NewWriter(conn)
+	reader := bufio.NewReaderSize(conn, 4096) // def buf 4k
+	writer := bufio.NewWriterSize(conn, 4096) // def buf 4k
+	//todo? выбрать компромис между количеством вызовов и общим потреблением памяти
+
 	//при тестировании иногда выявлялся мусор в новом подключении - очистить
 	clearBufferSafe(reader, 4096)
 
