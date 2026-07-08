@@ -63,7 +63,6 @@ type VikingFrame struct {
 	msgid           byte
 	txb             []byte
 	body            []byte
-	// options []Option //[]byte
 	// crc int //uint16
 }
 
@@ -97,7 +96,7 @@ func (vf *VikingFrame) EndTx() {
 	vf.txb = append(vf.txb, hi)
 }
 
-// создает на основе пришедших байт
+// создает на основе пришедших байт с проверкой crc
 // test crc: ss := "00-0E-80-00-00-00-00-21-52-02-01-96-55-01-04-FF-52-F0"; bb, _ := HexToBuf(ss)
 func NewVikingFrameRx(bb []byte) (*VikingFrame, error) {
 	if len(bb) < 9 {
@@ -120,6 +119,17 @@ func NewVikingFrameRx(bb []byte) (*VikingFrame, error) {
 		vf.body = rxb[7:]
 	}
 	return &vf, nil
+}
+
+// формирует пакет для отправки с новым dest_adr
+func (vf *VikingFrame) SetTxb(bb []byte, dest int) {
+	rxb := bb[:len(bb)-2]    //без crc
+	rxb[3] = byte(dest >> 8) //as BHL(dest)
+	rxb[4] = byte(dest)
+	hi, lo := Crc(rxb)
+	vf.txb = rxb
+	vf.txb = append(vf.txb, lo)
+	vf.txb = append(vf.txb, hi)
 }
 
 func (vf *VikingFrame) AddOption(code byte, vv string) {

@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	AMOUNT_KP = 2 //id начинается с 1
-	AMOUNT_PU = 1 //id начинается с 1001
+	AMOUNT_KP  = 2 //id начинается с 1
+	AMOUNT_PU  = 2 //id начинается с 1001
+	FIRSTID_KP = 1
+	FIRSTID_PU = 1001
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -38,7 +40,7 @@ func main() {
 	config.Clients = []ClientConfig{} //очистить взятые из файла
 	idx := 0
 	for n := range AMOUNT_KP {
-		idkp := n + 1
+		idkp := n + FIRSTID_KP
 		sidkp := fmt.Sprintf("%04d", idkp)
 		cli := ClientConfig{Id: idkp, Info: "Info" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
 		config.Clients = append(config.Clients, cli)
@@ -47,7 +49,7 @@ func main() {
 		tcc = append(tcc, *client)
 	}
 	for n := range AMOUNT_PU {
-		idpu := n + 1001
+		idpu := n + FIRSTID_PU
 		sidpu := fmt.Sprintf("%04d", idpu)
 		cli := ClientConfig{Id: idpu, Info: "Info" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
 		config.Clients = append(config.Clients, cli)
@@ -153,30 +155,29 @@ func (c *TCPClient) Start() {
 	TotalScore--
 }
 
-//ПУ в цикле запрашивает статус КП - отпрапвляет инф-пакет - ждет инф-ответ
-//КП в цикле отпраляет пинг - ждет понг, получив инф-пакет отвечает
-
 func (c *TCPClient) startHeartbeat() {
 	c.say("Start " + c.conf.Mode)
 	data := make([]byte, 10)
 	dataChan := make(chan string, 10)
 	go c.Receive(dataChan)
 
-	dest := 1
+	destKp := FIRSTID_KP
+	destPU := FIRSTID_PU
 	for {
 
+		//ПУ в цикле: запрашивает статус КП - отпрапвляет инф-пакет - ждет инф-ответ
 		if c.conf.Mode == "pu" {
-			fmt.Println("TotalScore=", TotalScore, "  dest=", dest)
+			// fmt.Println("TotalScore=", TotalScore, "  dest=", dest)
 
 			//запрос статуса КП
 			stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
-			stf.AddOptionInt(OPT_PID, dest) //PointID
+			stf.AddOptionInt(OPT_PID, destKp) //PointID
 			stf.EndTx()
 			if err := c.Send(stf.txb); err != nil {
 				c.sayError("send req status", err)
 				return
 			}
-			c.say(fmt.Sprintf("<- req status of %v ", dest))
+			c.say(fmt.Sprintf("<- req status of %v ", destKp))
 			var staton bool
 			for {
 				msg := <-dataChan
@@ -186,38 +187,38 @@ func (c *TCPClient) startHeartbeat() {
 				} else if msg == "astat_off" {
 					break
 				} else {
-					c.say(msg + "------------------as")
+					c.say(msg + "------------------ не astat!")
 				}
 			}
 
 			time.Sleep(time.Millisecond * 500)
 			if staton {
 				//отправка инф-пакета в КП и прием ответа
-				inf := NewVikingFrameInf(dest, c.id, data)
+				inf := NewVikingFrameInf(destKp, c.id, data)
 				if err := c.Send(inf.txb); err != nil {
 					c.sayError("send inf", err)
 					return
 				}
-				c.say(fmt.Sprintf("<- INF to %v ", dest))
+				c.say(fmt.Sprintf("<- INF to %v ", destKp))
 				for {
 					msg := <-dataChan
 					if msg == "inf" {
 						break
 					} else {
-						c.say(msg + "-----------------inf")
+						c.say(msg + "----------------- не inf!")
 					}
 				}
 			}
 
-			dest++
-			if dest > AMOUNT_KP {
-				dest = 1
-				c.say("------------ dest")
+			destKp++
+			if destKp >= (FIRSTID_KP + AMOUNT_KP) {
+				destKp = FIRSTID_KP
+				// c.say("------------ dest kp")
 			}
 			time.Sleep(time.Millisecond * 5000)
 
-		} else { // KP:
-
+		} else {
+			//КП в цикле: отпраляет пинг - ждет понг, получив инф-пакет - отвечает, отправляет спорадический пакет в ПУ
 			time.Sleep(time.Millisecond * 10000)
 
 			//отправка пинга и прием понга
@@ -239,12 +240,18 @@ func (c *TCPClient) startHeartbeat() {
 
 			//отправка спорадического пакета от КП
 			time.Sleep(time.Millisecond * 1000)
-			inf := NewVikingFrameSpor(0, c.id, data)
+			inf := NewVikingFrameSpor(destPU, c.id, data)
 			if err := c.Send(inf.txb); err != nil {
 				c.sayError("send spor", err)
 				return
 			}
-			c.say("<- spor")
+			c.say(fmt.Sprintf("<- spor to %v ", destPU))
+
+			destPU++
+			if destPU >= (FIRSTID_PU + AMOUNT_PU) {
+				destPU = FIRSTID_PU
+				// c.say("------------ dest pu")
+			}
 
 		}
 	}

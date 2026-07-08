@@ -40,9 +40,9 @@ func LogSetup(mode, logDir string) (restr string, consoleUse bool, err error) {
 	case "1": //в файл
 	case "2":
 		consoleUse = true
-		logDir = "" //в консоль
+		logDir = "" //в консоль т.е в Терминал, не в Debug console
 	default:
-		restr += "Default" //по умолчанию
+		restr += "Default" //по умолчанию - в консоль, json
 		return
 	}
 	var w io.Writer

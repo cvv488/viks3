@@ -18,6 +18,7 @@ import (
 
 const (
 	APP_INFO = "Viking Server v0.7"
+	PLINE    = "-----------------------------------"
 )
 
 func main() {
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	// Загружаем учётные данные
-	server, err := NewConnectionServer(config, "auth.json")
+	server, err := NewConnectionServer(config, "credentials.json")
 	if err != nil {
 		sayError("NewConnectionServer", err)
 		return
@@ -65,6 +66,7 @@ func (srv *ConnectionServer) Start() {
 	go func() {
 		defer wg.Done()
 		reader := bufio.NewReader(os.Stdin)
+		startTime := time.Now()
 		for {
 			// Сначала проверяем контекст, чтобы не делать блокирующий вызов, если уже пора выходить
 			if ctx.Err() != nil {
@@ -86,22 +88,24 @@ func (srv *ConnectionServer) Start() {
 			}
 
 			fmt.Printf(">>:  %s\n", line)
+			fmt.Println(PLINE)
 			switch line {
-			case "help", "?":
+			case  "?", "help":
 				fmt.Println("Help:")
 				fmt.Println(APP_INFO)
+				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime))
+				fmt.Println(PLINE)
 			case "exit":
 				cancel()
 				return
-			case "list":
-				fmt.Println("-----------------------------------")
+			case "l", "list":
 				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
 				srv.mutex.RLock() //srv.mutex.Lock()
 				for id, client := range srv.clients {
 					fmt.Printf("[%d]\t%s, Conn=%v\n", id, client.Info, client.Conn.RemoteAddr())
 				}
 				srv.mutex.RUnlock()
-				fmt.Println("-----------------------------------")
+				fmt.Println(PLINE)
 			}
 		}
 	}()
@@ -127,10 +131,10 @@ func (srv *ConnectionServer) Start() {
 		sayError("Ошибка при запуске сервера", err)
 		return
 	}
-	srv.listener = listener
+	// srv.listener = listener
 	defer func() {
 		_ = listener.Close()
-		srv.listener = nil
+		// srv.listener = nil
 	}()
 	say("Сервер запущен на порту " + srv.config.Port)
 
@@ -287,10 +291,10 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 }
 
 // Обрабатывает сообщения от конкретного клиента
-func (c *Client) handleClient(s *ConnectionServer) {
+func (c *Client) handleClient(srv *ConnectionServer) {
 	pref := "handleClient: "
 	defer func() {
-		s.unregister <- c
+		srv.unregister <- c
 		c.say("exit")
 	}()
 	c.say("успешно аутентифицирован")
@@ -336,12 +340,12 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				sf.AddOptionInt(OPT_PID, pointId)   //PointID
 				sf.AddOptionInt(OPT_NETID, pointId) //NetID
 				astat := 4
-				if _, ok := s.clients[pointId]; ok != true {
+				if _, ok := srv.clients[pointId]; ok != true {
 					astat = 2 //отключен
 				}
 				sf.AddOptionByte(OPT_STAT, byte(astat))
 				sf.EndTx()
-				err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
+				err = Send(sf.txb, c.Conn, c.Writer, srv.config.Timeout)
 				if err != nil {
 					c.sayError("send astat", err)
 					return
@@ -350,7 +354,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 
 			case MID_PING: //Запрос “Keep alive”
 				c.say("-> ping")
-				err = Send(pif.txb, c.Conn, c.Writer, s.config.Timeout)
+				err = Send(pif.txb, c.Conn, c.Writer, srv.config.Timeout)
 				if err != nil {
 					c.sayError("send pong", err)
 					return
@@ -362,7 +366,7 @@ func (c *Client) handleClient(s *ConnectionServer) {
 				//Note: также касается и известных команд протокола которые не поддерживаются версией, например подписки
 				sf := NewVikingFrame(TSLUG, 0, 0, MID_UNSU)
 				sf.EndTx()
-				err = Send(sf.txb, c.Conn, c.Writer, s.config.Timeout)
+				err = Send(sf.txb, c.Conn, c.Writer, srv.config.Timeout)
 				if err != nil {
 					c.sayError("send unsupport", err)
 					return
@@ -372,13 +376,37 @@ func (c *Client) handleClient(s *ConnectionServer) {
 
 		case TINFO:
 			//информационный пакет отправить по destadr
-			c.say(fmt.Sprintf("=> inf to %v", vf.destadr))
-			rm := RouteMessage{Dest: vf.destadr, Data: bb}
-			s.routecast <- rm
+			msg := fmt.Sprintf("inf to %v", vf.destadr)
+			c.say("=> " + msg)
+			rm := RouteMessage{Dest: vf.destadr, Data: bb, LogMsg: msg} //информационный пакет отправляется по назначению без изменений
+			srv.routecast <- rm
 
 		case TSPOR:
-			c.say("==> spor")
-			// c.spor
+			//спорадический пакет отправить по destadr если не 0
+			msg := fmt.Sprintf("spor to %v", vf.destadr)
+			c.say("=> " + msg)
+			firstDest := -1
+			if vf.destadr != 0 {
+				rm := RouteMessage{Dest: vf.destadr, Data: bb, LogMsg: msg}
+				srv.routecast <- rm
+				firstDest = vf.destadr
+			}
+
+			//и отправить по списку рассылки этого клиента (если есть, можно и в 0)
+			for _, ds := range c.spor {
+				if ds == firstDest {
+					continue //не повторять туда же
+				}
+				msg = fmt.Sprintf("spor list to %v", ds)
+				if _, ok := srv.clients[ds]; ok == true { //приемник зарегистрирован
+					vf.SetTxb(bb, ds) //сформировать пакет с новым dest_adr
+					rm := RouteMessage{Dest: ds, Data: vf.txb, LogMsg: msg}
+					srv.routecast <- rm
+				} else {
+					sayW("Off dest: " + msg)
+					//todo? отправить резервным клиентам
+				}
+			}
 
 		default:
 			c.sayW(fmt.Sprintf("~~> unknown tid=%v", vf.tid))
@@ -388,13 +416,14 @@ func (c *Client) handleClient(s *ConnectionServer) {
 
 // Обрабатывает события регистрации/удаления клиентов и рассылку сообщений
 func (srv *ConnectionServer) handleEvents() {
+	var cli *Client
 	for {
 		select {
 		case client := <-srv.register:
 			srv.mutex.Lock()
 			srv.clients[client.Id] = client
 			srv.mutex.Unlock()
-			say(fmt.Sprintf("Registered %v, total %d", client.Id, len(srv.clients)))
+			say(fmt.Sprintf("Registered %v, total %d", client.ids, len(srv.clients)))
 
 		case client := <-srv.unregister:
 			srv.mutex.Lock()
@@ -403,26 +432,24 @@ func (srv *ConnectionServer) handleEvents() {
 				client.Conn.Close()
 			}
 			srv.mutex.Unlock()
-			say(fmt.Sprintf("Unregistered %v, total %d", client.Id, len(srv.clients)))
+			say(fmt.Sprintf("Unregistered %v, total %d", client.ids, len(srv.clients)))
 
 		case message := <-srv.routecast:
-			var cli *Client
 			var ok bool
 			srv.mutex.RLock()
-			if cli, ok = srv.clients[message.Dest]; ok == true { //клиент Dest есть
-			} else {
-				sayW(fmt.Sprintf("No route: Bad Dest %v", message.Dest))
+			if cli, ok = srv.clients[message.Dest]; ok != true {
+				sayW("Off dest: " + message.LogMsg)
 				//todo отправить резервным клиентам
 			}
 			srv.mutex.RUnlock()
 			if ok {
 				err := Send(message.Data, cli.Conn, cli.Writer, srv.config.Timeout)
 				if err != nil {
-					cli.sayError("routecast", err)
+					cli.sayError("routecast:"+message.LogMsg, err)
 					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
 					return
 				}
-				cli.say("<- INF")
+				cli.say("<= " + message.LogMsg)
 			}
 		}
 	}

@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"net"
 	"sync"
-	"time"
 )
 
 type ConnectionServer struct {
+	// listener        net.Listener
 	clients         map[int]*Client //подключенные клиенты
 	register        chan *Client
 	unregister      chan *Client
@@ -17,7 +17,7 @@ type ConnectionServer struct {
 	connectionCount int
 	mutex           sync.RWMutex
 	// logger          *log.Logger
-	keepAliveTicker *time.Ticker // тикер для периодических проверок
+	// keepAliveTicker *time.Ticker // тикер для периодических проверок
 }
 
 type ServerConfig struct {
@@ -36,6 +36,7 @@ type AuthCredential struct {
 	Rem      string `json:"rem"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Spor     []int  `json:"spor"` //массив id клиентов куда дополнительно отправить (кроме dest_adr) спорадический пакет
 }
 
 type Client struct {
@@ -47,13 +48,15 @@ type Client struct {
 	Reader    *bufio.Reader
 	KaTimeout int
 	Mutex     sync.Mutex
+	spor      []int //список рассылки спорадических
 	// LastLive  time.Time // время последнего пакета от клиента
 	// logger   *log.Logger
 }
 
 type RouteMessage struct {
-	Dest int
-	Data []byte
+	Dest   int //адрес получателя
+	Data   []byte
+	LogMsg string
 }
 
 func (cli *Client) say(msg string) {
