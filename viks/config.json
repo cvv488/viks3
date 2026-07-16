@@ -3,8 +3,8 @@
   "max_connections": 10000,
   "wait_reg":10000,
   "timeout": 10000,
-  "keep_alive_timeout": 20000,
+  "keep_alive_timeout": 600000,
   "logmode": "2",
-  "logdir": "d:/WORK/antx/logs",
-  "debug1": 1
+  "logdir": "logs",
+  "debug1": 0
 }

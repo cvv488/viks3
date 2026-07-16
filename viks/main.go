@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v0.7"
+	APP_INFO = "Viking Server v0.8"
 	PLINE    = "-----------------------------------"
 )
 
@@ -65,6 +65,10 @@ func (srv *ConnectionServer) Start() {
 	// CLI: читает строки через bufio.Reader / поодерживается история команд - стрелки вверх/вниз
 	go func() {
 		defer wg.Done()
+		fmt.Println("CLI started. Coommands:")
+		fmt.Println("  ?, help: вывод текущей информации")
+		fmt.Println("  l, list: вывод списка подключенных клиентов")
+		fmt.Println("  exit, Ctrl+C: выход")
 		reader := bufio.NewReader(os.Stdin)
 		startTime := time.Now()
 		for {
@@ -90,7 +94,7 @@ func (srv *ConnectionServer) Start() {
 			fmt.Printf(">>:  %s\n", line)
 			fmt.Println(PLINE)
 			switch line {
-			case  "?", "help":
+			case "?", "help":
 				fmt.Println("Help:")
 				fmt.Println(APP_INFO)
 				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime))
@@ -284,8 +288,12 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		Writer:    writer,
 		Reader:    reader,
 		KaTimeout: srv.config.KeepAliveTimeout,
-		spor:      cre.Spor,
+		spor:      cre.Spor, //при debug=1 cre=nil panic
 	}
+	// if cre != nil{ //for debug=1
+	// 	client.spor = cre.Spor
+	// }
+
 	srv.register <- client
 	client.handleClient(srv)
 }
@@ -320,8 +328,8 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 		count++
 		vf, err := NewVikingFrameRx(bb)
 		if err != nil {
-			c.sayError("handleClient", err)
-			continue //return
+			c.sayError(pref, err)
+			continue
 		}
 		switch vf.tid {
 		case TSLUG:

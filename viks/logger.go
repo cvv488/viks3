@@ -63,11 +63,12 @@ func LogSetup(mode, logDir string) (restr string, consoleUse bool, err error) {
 			}
 		}
 	} else {
-		restr += "Вывод в файл "
+		fname := "app.log"
+		restr += fmt.Sprintf("Вывод в файл '%s %s' ", logDir, fname)
 		if err = os.MkdirAll(logDir, 0o755); err != nil {
 			return
 		}
-		path := filepath.Join(logDir, "app.log")
+		path := filepath.Join(logDir, fname)
 		file, err0 := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err0 != nil {
 			err = err0
