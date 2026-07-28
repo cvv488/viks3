@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "viks",
+            "name": "viks run",
             "type": "go",
             "request": "launch",
             "mode": "debug",

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v0.8"
+	APP_INFO = "Viking Server v1.0"
 	PLINE    = "-----------------------------------"
 )
 
@@ -105,8 +105,9 @@ func (srv *ConnectionServer) Start() {
 			case "l", "list":
 				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
 				srv.mutex.RLock() //srv.mutex.Lock()
-				for id, client := range srv.clients {
-					fmt.Printf("[%d]\t%s, Conn=%v\n", id, client.Info, client.Conn.RemoteAddr())
+				for _, client := range srv.clients {
+					fmt.Printf("%s\n", client.Print())
+					// fmt.Printf("[%d]\t%s, Conn=%v RunTime=%v\n", id, client.Info, client.Conn.RemoteAddr(), time.Since(client.RunTime))
 				}
 				srv.mutex.RUnlock()
 				fmt.Println(PLINE)
@@ -289,6 +290,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		Reader:    reader,
 		KaTimeout: srv.config.KeepAliveTimeout,
 		spor:      cre.Spor, //при debug=1 cre=nil panic
+		RunTime:   time.Now(),
 	}
 	// if cre != nil{ //for debug=1
 	// 	client.spor = cre.Spor
@@ -322,7 +324,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 			return
 		}
 		if reto {
-			c.sayW("Close keep-alive timeout") //принудительное отключение молчащего клиента
+			c.sayW(fmt.Sprintf("Close keep-alive timeout=%dms", c.KaTimeout)) //принудительное отключение молчащего клиента
 			return
 		}
 		count++

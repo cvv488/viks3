@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"sync"
+	"time"
 )
 
 type ConnectionServer struct {
@@ -46,9 +48,10 @@ type Client struct {
 	Conn      net.Conn
 	Writer    *bufio.Writer
 	Reader    *bufio.Reader
-	KaTimeout int
+	KaTimeout int //таймаут молчания для отключения, мс
 	Mutex     sync.Mutex
-	spor      []int //список рассылки спорадических
+	spor      []int     //список рассылки спорадических
+	RunTime   time.Time // время подключения клиента
 	// LastLive  time.Time // время последнего пакета от клиента
 	// logger   *log.Logger
 }
@@ -70,6 +73,10 @@ func (cli *Client) sayError1(msg string) {
 }
 func (cli *Client) sayW(msg string) {
 	sayW(cli.ids + ": " + msg)
+}
+func (cli *Client) Print() string {
+
+	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime), cli.spor)
 }
 
 // Создаёт новый сервер соединений с загрузкой конфигурации

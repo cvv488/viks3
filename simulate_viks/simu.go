@@ -42,7 +42,7 @@ func main() {
 	for n := range AMOUNT_KP {
 		idkp := n + FIRSTID_KP
 		sidkp := fmt.Sprintf("%04d", idkp)
-		cli := ClientConfig{Id: idkp, Info: "Info" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
+		cli := ClientConfig{Id: idkp, Info: "М-320:" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
 		config.Clients = append(config.Clients, cli)
 		client := NewTCPClient(idx, config)
 		idx++
@@ -51,7 +51,7 @@ func main() {
 	for n := range AMOUNT_PU {
 		idpu := n + FIRSTID_PU
 		sidpu := fmt.Sprintf("%04d", idpu)
-		cli := ClientConfig{Id: idpu, Info: "Info" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
+		cli := ClientConfig{Id: idpu, Info: "ПУ" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
 		config.Clients = append(config.Clients, cli)
 		client := NewTCPClient(idx, config)
 		idx++
