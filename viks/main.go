@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v1.0"
+	APP_INFO = "Viking Server v1.1"
 	PLINE    = "-----------------------------------"
 )
 
@@ -103,6 +103,8 @@ func (srv *ConnectionServer) Start() {
 				cancel()
 				return
 			case "l", "list":
+				fmt.Println(APP_INFO)
+				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime))
 				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
 				srv.mutex.RLock() //srv.mutex.Lock()
 				for _, client := range srv.clients {
@@ -320,7 +322,11 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 	for {
 		bb, reto, err := ReadPac(c.Conn, c.Reader, c.KaTimeout) //ждать с KeepAliveTimeout
 		if err != nil {
-			c.sayError(pref, err)
+			if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "EOF") {
+				c.sayW(pref + "eof:disconnected") //это не ошибка
+			} else {
+				c.sayError(pref, err)
+			}
 			return
 		}
 		if reto {
@@ -413,7 +419,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 					rm := RouteMessage{Dest: ds, Data: vf.txb, LogMsg: msg}
 					srv.routecast <- rm
 				} else {
-					sayW("Off dest: " + msg)
+					c.sayW("Off dest: " + msg)
 					//todo? отправить резервным клиентам
 				}
 			}
