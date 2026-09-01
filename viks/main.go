@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v1.1"
+	APP_INFO = "Viking Server v1.2"
 	PLINE    = "-----------------------------------"
 )
 
@@ -227,7 +227,7 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		return
 	}
 	pointId := IHL(op.Body)
-	pids := fmt.Sprintf("%04d", pointId)
+	pids := fmt.Sprintf("%04X", pointId)
 	var cre *AuthCredential
 	if srv.config.Debug1 == 1 { //debug - пускать всех
 	} else {
@@ -350,7 +350,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 					return
 				}
 				pointId := IHL(op.Body)
-				c.say(fmt.Sprintf("-> req_status of %v", pointId))
+				c.say(fmt.Sprintf("-> req_status of %04X", pointId))
 
 				sf := NewVikingFrame(TSLUG, 0, 0, MID_ASTAT)
 				sf.AddOptionInt(OPT_PID, pointId)   //PointID
@@ -366,7 +366,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 					c.sayError("send astat", err)
 					return
 				}
-				c.say(fmt.Sprintf("<- status of %v is %v", pointId, astat))
+				c.say(fmt.Sprintf("<- status of %04X is %v", pointId, astat))
 
 			case MID_PING: //Запрос “Keep alive”
 				c.say("-> ping")
@@ -392,14 +392,14 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 
 		case TINFO:
 			//информационный пакет отправить по destadr
-			msg := fmt.Sprintf("inf to %v", vf.destadr)
+			msg := fmt.Sprintf("inf to %04X", vf.destadr)
 			c.say("=> " + msg)
 			rm := RouteMessage{Dest: vf.destadr, Data: bb, LogMsg: msg} //информационный пакет отправляется по назначению без изменений
 			srv.routecast <- rm
 
 		case TSPOR:
 			//спорадический пакет отправить по destadr если не 0
-			msg := fmt.Sprintf("spor to %v", vf.destadr)
+			msg := fmt.Sprintf("spor to %04X", vf.destadr)
 			c.say("=> " + msg)
 			firstDest := -1
 			if vf.destadr != 0 {
@@ -413,7 +413,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 				if ds == firstDest {
 					continue //не повторять туда же
 				}
-				msg = fmt.Sprintf("spor list to %v", ds)
+				msg = fmt.Sprintf("spor list to %04X", ds)
 				if _, ok := srv.clients[ds]; ok == true { //приемник зарегистрирован
 					vf.SetTxb(bb, ds) //сформировать пакет с новым dest_adr
 					rm := RouteMessage{Dest: ds, Data: vf.txb, LogMsg: msg}

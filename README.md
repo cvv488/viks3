@@ -49,13 +49,15 @@
 
 ## credentials.json - массив конфигураций подключаемых клиентов:
 Например:
+```json
 [
   { "id": 1, "username": "User0001", "password": "Passw0001", "spor":[1001, 1002] },
   { "id": 2, "username": "User0002", "password": "Passw0002" },
   { "id": 1001, "username": "User1001", "password": "Passw1001" },
   { "id": 1002, "username": "User1002", "password": "Passw1002" }
 ]
-где в конфигурации клиента:
+```
+где:
 - "id" - адрес-идентификатор (int)
 - "username" и  "password" - логин с которым сравнивается клиент при авторизации
 - "spor" - массив адресов (список рассылки) спорадики этого клиента, т.е. если от этого клиента приходит спорадический пакет он будет отправлен и по этому списку
@@ -64,6 +66,7 @@
 # 3. CLI (command-line interface)
 - "?", "help": вывод текущей информации
 - "l", "list": вывод списка подключенных клиентов, пример:
+```sh
     -----------------------------------
     List: Всего клиентов 4
     0001: 'Info0001' Conn=[::1]:54559 RunTime=1m53.2441032s Spor:[1001 1002]
@@ -72,13 +75,15 @@
     1002: 'Info1002' Conn=[::1]:54562 RunTime=1m53.1441065s Spor:[]
     -----------------------------------
 - "exit", Ctrl+C: выход
-
+```
 
 
 # 4. Логирование
-- Логировние: Error-ошибки самого приложения, Warning-внешние причины
-Пример:
+- Error: ошибки самого приложения
+- Warning: внешние причины
 
+Пример:
+```log
 Подключился клиент 1003, всего стало клиентов 3
 2026-07-30 15:41:37 INF Новое подключение: ip:57779
 2026-07-30 15:41:37 INF 1003: успешно аутентифицирован
@@ -96,11 +101,11 @@
 2026-07-30 15:40:30 INF 1003: => inf to 1001
 2026-07-30 15:40:30 INF 1001: <= inf to 1001
 
-От клиента 1002 пришел спорадический пакет с адресатом 0, у клиента 1002 есть список рассылки spor:[65535,1003]\
+От клиента 1002 пришел спорадический пакет с адресатом 0, у клиента 1002 есть список рассылки spor:[65535,1003]
 2026-07-30 15:48:05 INF 1002: => spor to 0                  //сервер в адрес 0 не отправил
 2026-07-30 15:48:05 WRN 1002: Off dest: spor list to 65535  //сервер попытался отправить клиенту 65535, но он offline - не отправил
 2026-07-30 15:48:05 INF 1003: <= spor list to 1003          //сервер успешно отправл клиенту 1003, т.к. он online
-
+```
 
 
 
@@ -109,18 +114,20 @@
 - ~~настроен одновременный запуск в launch."compounds"~~, но удобнее запускать simulate в другом окне vscode
 - не получается зашарить common.go и vikingframe.go  для /simulate - нужно всегда копировать при обновлении (без модулей)
 - Включен режим модулей для импорта zerolog:
+```sh
     go env GO111MODULE
     go env -w GO111MODULE="on"
     go mod init viks3
     go mod tidy
  
-```sh
-# в Windows powershell, Терминал vscode
+# Сборка в Windows powershell или Терминал vscode
 cd viks
+## для windows
 $env:GOOS="windows"; $env:GOARCH="amd64"; go build -o ./exe/viks.exe
+## для linux
 $env:GOOS="linux"; $env:GOARCH="amd64"; go build -o ./exe/viks
 
-# в Windows cmd
+# Сборка в Windows cmd
 set GOOS=windows
 set GOARCH=amd64
 go build -o
@@ -128,14 +135,14 @@ go build -o
 set GOOS=windows&&set GOARCH=amd64&&go build
 
 
-# Linux sh: ----------
-# Linux amd64 (часто для контейнеров/Kubernetes)
+# Сборка в Linux: ----------
+# для Linux amd64 (часто для контейнеров/Kubernetes)
 GOOS=linux GOARCH=amd64 go build -o myapp-linux-amd64 ./cmd/server
 
-# Windows amd64
+# для Windows amd64
 GOOS=windows GOARCH=amd64 go build -o myapp.exe ./cmd/server
 
-# macOS ARM64
+# для macOS ARM64
 GOOS=darwin GOARCH=arm64 go build -o myapp-mac ./cmd/server
 ```
 
@@ -144,6 +151,7 @@ GOOS=darwin GOARCH=arm64 go build -o myapp-mac ./cmd/server
 2. распространить ctx (при exit ReadPac логирует ошибки)
 3. размер буфера в настройки? bufio.NewWriterSize()
 4. сообщение CLI в лог?
+
 Этап2:
 11. web-интерфейс
 12. статистика

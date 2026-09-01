@@ -76,7 +76,8 @@ func (cli *Client) sayW(msg string) {
 }
 func (cli *Client) Print() string {
 
-	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime), cli.spor)
+	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime), cli.spor) 
+	//TODO cli.spor print as %04X
 }
 
 // Создаёт новый сервер соединений с загрузкой конфигурации

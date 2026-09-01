@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	AMOUNT_KP  = 2 //id начинается с 1
-	AMOUNT_PU  = 2 //id начинается с 1001
+	AMOUNT_KP  = 1
+	AMOUNT_PU  = 1
 	FIRSTID_KP = 1
-	FIRSTID_PU = 1001
+	FIRSTID_PU = 0xEE01
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -41,7 +41,7 @@ func main() {
 	idx := 0
 	for n := range AMOUNT_KP {
 		idkp := n + FIRSTID_KP
-		sidkp := fmt.Sprintf("%04d", idkp)
+		sidkp := fmt.Sprintf("%04X", idkp)
 		cli := ClientConfig{Id: idkp, Info: "М-320:" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
 		config.Clients = append(config.Clients, cli)
 		client := NewTCPClient(idx, config)
@@ -50,7 +50,7 @@ func main() {
 	}
 	for n := range AMOUNT_PU {
 		idpu := n + FIRSTID_PU
-		sidpu := fmt.Sprintf("%04d", idpu)
+		sidpu := fmt.Sprintf("%04X", idpu)
 		cli := ClientConfig{Id: idpu, Info: "ПУ" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
 		config.Clients = append(config.Clients, cli)
 		client := NewTCPClient(idx, config)
@@ -177,7 +177,7 @@ func (c *TCPClient) startHeartbeat() {
 				c.sayError("send req status", err)
 				return
 			}
-			c.say(fmt.Sprintf("<- req status of %v ", destKp))
+			c.say(fmt.Sprintf("<- req status of %04X ", destKp))
 			var staton bool
 			for {
 				msg := <-dataChan
@@ -199,7 +199,7 @@ func (c *TCPClient) startHeartbeat() {
 					c.sayError("send inf", err)
 					return
 				}
-				c.say(fmt.Sprintf("<- INF to %v ", destKp))
+				c.say(fmt.Sprintf("<- INF to %04X ", destKp))
 				for {
 					msg := <-dataChan
 					if msg == "inf" {
@@ -245,7 +245,7 @@ func (c *TCPClient) startHeartbeat() {
 				c.sayError("send spor", err)
 				return
 			}
-			c.say(fmt.Sprintf("<- spor to %v ", destPU))
+			c.say(fmt.Sprintf("<- spor to %04X ", destPU))
 
 			destPU++
 			if destPU >= (FIRSTID_PU + AMOUNT_PU) {
@@ -302,17 +302,17 @@ func (c *TCPClient) Receive(dataChan chan string) {
 			}
 		case TINFO:
 			if c.conf.Mode == "pu" {
-				c.say(fmt.Sprintf("-> INF from %v ", rxf.srcadr))
+				c.say(fmt.Sprintf("-> INF from %04X ", rxf.srcadr))
 				dataChan <- "inf"
 			} else {
-				c.say(fmt.Sprintf("=> INF from %v ", rxf.srcadr))
+				c.say(fmt.Sprintf("=> INF from %04X ", rxf.srcadr))
 				// ответить на инф-пакет отправителю
 				inf := NewVikingFrameInf(rxf.srcadr, c.id, rxf.body)
 				if err := c.Send(inf.txb); err != nil {
 					c.sayError("send inf", err)
 					return
 				}
-				c.say(fmt.Sprintf("<= INF to %v ", rxf.srcadr))
+				c.say(fmt.Sprintf("<= INF to %04X ", rxf.srcadr))
 			}
 
 		case TSPOR:
