@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -498,6 +499,11 @@ func LoadConfig(fpath string) (*ServerConfig, error) {
 	return &config, err
 }
 
+func hextoint(hex string) (int64, error) {
+	hexStr := strings.TrimPrefix(hex, "0x")
+	return strconv.ParseInt(hexStr, 16, 64)
+}
+
 // Загружает учётные данные из файла
 func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	file, err := os.Open(filename)
@@ -512,6 +518,24 @@ func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ошибка парсинга учётных данных: %v", err)
 	}
+
+	//заполнить int-поля из hex-полей
+	for i, crecpy := range credentials {
+		vv, err := hextoint(crecpy.IdHex)
+		if err != nil {
+			return nil, err
+		}
+		credentials[i].Id = int(vv)
+
+		for _, sporcpy := range crecpy.SporHex {
+			ss, err := hextoint(sporcpy)
+			if err != nil {
+				return nil, err
+			}
+			credentials[i].Spor = append(credentials[i].Spor, int(ss))
+		}
+	}
+
 	return credentials, nil
 }
 

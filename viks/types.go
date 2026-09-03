@@ -34,12 +34,22 @@ type ServerConfig struct {
 }
 
 type AuthCredential struct {
-	Id       int    `json:"id"`
-	Rem      string `json:"rem"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Spor     []int  `json:"spor"` //массив id клиентов куда дополнительно отправить (кроме dest_adr) спорадический пакет
+	IdHex    string   `json:"id"`
+	Id       int      //`json:"id"`
+	Rem      string   `json:"rem"`
+	Username string   `json:"username"`
+	Password string   `json:"password"`
+	SporHex  []string `json:"spor"` //массив id клиентов куда дополнительно отправить (кроме dest_adr) спорадический пакет
+	Spor     []int    //`json:"spor"`
 }
+
+// type hexAuthCredential struct {
+// 	Id       string   `json:"id"`
+// 	Rem      string   `json:"rem"`
+// 	Username string   `json:"username"`
+// 	Password string   `json:"password"`
+// 	Spor     []string `json:"spor"` //массив id клиентов куда дополнительно отправить (кроме dest_adr) спорадический пакет
+// }
 
 type Client struct {
 	Id        int
@@ -76,7 +86,7 @@ func (cli *Client) sayW(msg string) {
 }
 func (cli *Client) Print() string {
 
-	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime), cli.spor) 
+	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime), cli.spor)
 	//TODO cli.spor print as %04X
 }
 
