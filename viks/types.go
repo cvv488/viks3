@@ -78,8 +78,13 @@ func (cli *Client) sayW(msg string) {
 	sayW(cli.ids + ": " + msg)
 }
 func (cli *Client) Print() string {
-	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime).Truncate(time.Second), cli.spor)
-	//TODO cli.spor print as %04X
+	var ss strings.Builder
+	fmt.Fprintf(&ss, "%s: '%s' Conn=%v RunTime=%v Spor:[ ", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime).Truncate(time.Second))
+	for _, v := range cli.spor {
+		fmt.Fprintf(&ss, "%04X ", v)
+	}
+	ss.WriteString("]")
+	return ss.String()
 }
 
 // Создаёт новый сервер соединений с загрузкой конфигурации

@@ -98,7 +98,7 @@ func (srv *ConnectionServer) Start() {
 			case "?", "help":
 				fmt.Println("Help:")
 				fmt.Println(APP_INFO)
-				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime))
+				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime).Truncate(time.Second))
 				fmt.Println(PLINE)
 			case "exit":
 				cancel()

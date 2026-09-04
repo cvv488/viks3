@@ -12,7 +12,7 @@ import (
 
 const (
 	AMOUNT_KP  = 1
-	AMOUNT_PU  = 1
+	AMOUNT_PU  = 2
 	FIRSTID_KP = 1
 	FIRSTID_PU = 0xEE01
 )
