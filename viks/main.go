@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v1.2"
+	APP_INFO = "Viking Server v1.4"
 	PLINE    = "-----------------------------------"
 )
 
@@ -504,7 +504,7 @@ func hextoint(hex string) (int64, error) {
 	return strconv.ParseInt(hexStr, 16, 64)
 }
 
-// Загружает учётные данные из файла
+// Загружает учётные данные из файла (ai)
 func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -520,14 +520,17 @@ func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	}
 
 	//заполнить int-поля из hex-полей
-	for i, crecpy := range credentials {
-		vv, err := hextoint(crecpy.IdHex)
+	for i := range credentials {
+		if credentials[i].IdHex == "" {
+			return nil, fmt.Errorf("пустой IdHex[%d]", i)
+		}
+		vv, err := hextoint(credentials[i].IdHex)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("некорректный IdHex '%s': %v", credentials[i].IdHex, err)
 		}
 		credentials[i].Id = int(vv)
 
-		for _, sporcpy := range crecpy.SporHex {
+		for _, sporcpy := range credentials[i].SporHex {
 			ss, err := hextoint(sporcpy)
 			if err != nil {
 				return nil, err
@@ -535,7 +538,6 @@ func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 			credentials[i].Spor = append(credentials[i].Spor, int(ss))
 		}
 	}
-
 	return credentials, nil
 }
 

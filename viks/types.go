@@ -43,14 +43,6 @@ type AuthCredential struct {
 	Spor     []int    //`json:"spor"`
 }
 
-// type hexAuthCredential struct {
-// 	Id       string   `json:"id"`
-// 	Rem      string   `json:"rem"`
-// 	Username string   `json:"username"`
-// 	Password string   `json:"password"`
-// 	Spor     []string `json:"spor"` //массив id клиентов куда дополнительно отправить (кроме dest_adr) спорадический пакет
-// }
-
 type Client struct {
 	Id        int
 	ids       string //строка-id для лога

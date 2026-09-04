@@ -36,21 +36,26 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 		return nil, fmt.Errorf("ReadFileToBytes: не найден файл %s", fpath)
 	}
 	defer file.Close()
+
 	var data []byte
 	comment := false
 	scanner := bufio.NewScanner(file) //построчное чтение
+
 	for scanner.Scan() {
 		line := scanner.Text()
+
 		if comment {
 			if strings.Contains(line, "*/") {
 				comment = false
 			}
 			continue
 		}
+
 		if strings.Contains(line, "/*") {
 			comment = true
 			continue
 		}
+
 		//функция удаления комментариев
 		processedLine := func(line string) string {
 			commentPos := strings.Index(line, "//")
@@ -62,12 +67,14 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 		}(line)
 
 		if processedLine != "" {
-			data = append(data, []byte(processedLine)...)
+			data = append(data, processedLine...)
 		}
 	}
+
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("ReadFileToBytes: ошибка чтения файла: %s | %v", fpath, err)
 	}
+
 	//уберет забытую ',' перед ] и }
 	for i := 1; i < len(data); i++ {
 		bb := data[i] //; fmt.Printf("%s", string(bb))
@@ -77,16 +84,18 @@ func ReadFileToBytesJson(fpath string) ([]byte, error) {
 			}
 		}
 	}
-	// fmt.Println(string(data))
+
 	return data, nil
 }
 
-// вычитывает и возвращает пакет, re true-выход по таймауту
+// вычитывает и возвращает пакет, re true-выход по таймауту (ai)
 // быстрый - без аллокаций и внешнего буфера
 // если указан timeoutms ждем первые 2 байта с этим таймаутом, но следующие байты всегда дочитываются с таймаутом 5с
 // Убедитесь, что размер буфера bufio.Reader достаточен для самых больших пакетов
 func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, error) {
 	const pref = "ReadPac:"
+	const maxPacketSize = 65000
+	const readBodyTimeout = 5 * time.Second
 
 	//установка таймаута
 	if timeoutms > 0 {
@@ -120,7 +129,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, 
 
 	//и чтение остатка пакета с дедлайном
 	length := IHL(header) + 2 // осталось принять lenb+2crc
-	if length < 3 || length > 65000 {
+	if length < 3 || length > maxPacketSize {
 		//очистить буфер
 		available := reader.Buffered()
 		if available > 0 {
@@ -129,7 +138,7 @@ func ReadPac(conn net.Conn, reader *bufio.Reader, timeoutms int) ([]byte, bool, 
 		return nil, false, fmt.Errorf("%v bad len pac %d", pref, length)
 	}
 
-	if err := conn.SetReadDeadline(time.Now().Add(time.Second * 5)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(readBodyTimeout)); err != nil {
 		return nil, false, fmt.Errorf("%v setTimeout2: %v", pref, err)
 	}
 	// читаем тело напрямую (не через Peek + Discard)
@@ -238,20 +247,26 @@ func parseHexByte(s string) (byte, error) {
 }
 
 // Convert []byte to string "XX-XX...""
-func BufToHex(arr []byte) (str string) {
+??? func BufToHex(arr []byte) string {
+	if len(arr) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(arr) * 3) // выделяем память заранее: каждый байт -> "XX-" (3 символа)
+
 	for _, b := range arr {
-		// str += " 0x" //prefix
 		if b < 0x10 {
-			str += fmt.Sprintf("0%X-", b)
-		} else {
-			str += fmt.Sprintf("%X-", b)
+			builder.WriteByte('0')
 		}
+		builder.WriteString(fmt.Sprintf("%X-", b))
 	}
-	if len(str) > 1 {
-		return str[:len(str)-1]
-	}
-	return ""
+
+	// убираем последний "-"
+	result := builder.String()
+	return result[:len(result)-1]
 }
+
 
 // читает длину, потом тело пакета с дедлайнами
 // не в VikingFrame т.к. нужен доступ к таймаутам conn
