@@ -11,13 +11,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	APP_INFO = "Viking Server v1.2"
+	APP_INFO = "Viking Server v1.4"
 	PLINE    = "-----------------------------------"
 )
 
@@ -104,7 +105,7 @@ func (srv *ConnectionServer) Start() {
 				return
 			case "l", "list":
 				fmt.Println(APP_INFO)
-				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime))
+				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime).Truncate(time.Second))
 				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
 				srv.mutex.RLock() //srv.mutex.Lock()
 				for _, client := range srv.clients {
@@ -210,6 +211,11 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		sayW("выход, не дождался пакет регистрации")
 		return
 	}
+
+	if srv.logBytes {
+		say("~~> " + BufToHex(bb))
+	}
+
 	vf, err := NewVikingFrameRx(bb)
 	if err != nil {
 		sayError("authenticateClient", err)
@@ -282,6 +288,9 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		sayError(pids+": asend", err)
 		return
 	}
+	if srv.logBytes {
+		say("<~~ " + BufToHex(txf.txb))
+	}
 
 	client := &Client{
 		Id:        pointId,
@@ -334,6 +343,11 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 			return
 		}
 		count++
+
+		if srv.logBytes {
+			c.say("--> " + BufToHex(bb))
+		}
+
 		vf, err := NewVikingFrameRx(bb)
 		if err != nil {
 			c.sayError(pref, err)
@@ -366,6 +380,9 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 					c.sayError("send astat", err)
 					return
 				}
+				if srv.logBytes {
+					c.say("<-- " + BufToHex(sf.txb))
+				}
 				c.say(fmt.Sprintf("<- status of %04X is %v", pointId, astat))
 
 			case MID_PING: //Запрос “Keep alive”
@@ -374,6 +391,9 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 				if err != nil {
 					c.sayError("send pong", err)
 					return
+				}
+				if srv.logBytes {
+					c.say("<~~ " + BufToHex(pif.txb))
 				}
 				c.say("<- pong")
 
@@ -386,6 +406,9 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 				if err != nil {
 					c.sayError("send unsupport", err)
 					return
+				}
+				if srv.logBytes {
+					c.say("<~~ " + BufToHex(sf.txb))
 				}
 				c.sayW(fmt.Sprintf("-> bad msgid=0x%02X <- unsupport", vf.msgid))
 			}
@@ -465,6 +488,9 @@ func (srv *ConnectionServer) handleEvents() {
 					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
 					return
 				}
+				if srv.logBytes {
+					cli.say("<== " + BufToHex(message.Data))
+				}
 				cli.say("<= " + message.LogMsg)
 			}
 		}
@@ -498,7 +524,13 @@ func LoadConfig(fpath string) (*ServerConfig, error) {
 	return &config, err
 }
 
-// Загружает учётные данные из файла
+func hextoint(hex string) (int, error) {
+	hexStr := strings.TrimPrefix(hex, "0x")
+	vv, err := strconv.ParseInt(hexStr, 16, 64)
+	return int(vv), err
+}
+
+// Загружает учётные данные из файла (ai)
 func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -511,6 +543,26 @@ func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 	err = decoder.Decode(&credentials)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка парсинга учётных данных: %v", err)
+	}
+
+	//заполнить int-поля из hex-полей
+	for i := range credentials {
+		if credentials[i].IdHex == "" {
+			return nil, fmt.Errorf("пустой IdHex[%d]", i)
+		}
+		vv, err := hextoint(credentials[i].IdHex)
+		if err != nil {
+			return nil, fmt.Errorf("некорректный IdHex '%s': %v", credentials[i].IdHex, err)
+		}
+		credentials[i].Id = vv
+
+		for _, sporcpy := range credentials[i].SporHex {
+			ss, err := hextoint(sporcpy)
+			if err != nil {
+				return nil, err
+			}
+			credentials[i].Spor = append(credentials[i].Spor, ss)
+		}
 	}
 	return credentials, nil
 }
