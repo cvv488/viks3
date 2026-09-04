@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,7 +19,7 @@ type ConnectionServer struct {
 	credentials     []AuthCredential //todo to map?
 	connectionCount int
 	mutex           sync.RWMutex
-	// logger          *log.Logger
+	logBytes        bool //включает логирование байт пакетов
 	// keepAliveTicker *time.Ticker // тикер для периодических проверок
 }
 
@@ -77,8 +78,7 @@ func (cli *Client) sayW(msg string) {
 	sayW(cli.ids + ": " + msg)
 }
 func (cli *Client) Print() string {
-
-	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime), cli.spor)
+	return fmt.Sprintf("%s: '%s' Conn=%v RunTime=%v Spor:%v", cli.ids, cli.Info, cli.Conn.RemoteAddr(), time.Since(cli.RunTime).Truncate(time.Second), cli.spor)
 	//TODO cli.spor print as %04X
 }
 
@@ -94,6 +94,12 @@ func NewConnectionServer(config *ServerConfig, authFile string) (*ConnectionServ
 		}
 	}
 
+	logBytes := false
+	logmodes := strings.Split(config.LogMode, ",")
+	if len(logmodes) > 3 {
+		logBytes = strings.Contains(logmodes[3], "hexb")
+	}
+
 	return &ConnectionServer{
 		clients:         make(map[int]*Client),
 		register:        make(chan *Client),
@@ -102,5 +108,6 @@ func NewConnectionServer(config *ServerConfig, authFile string) (*ConnectionServ
 		config:          config,
 		credentials:     credentials,
 		connectionCount: 0,
+		logBytes:        logBytes,
 	}, nil
 }

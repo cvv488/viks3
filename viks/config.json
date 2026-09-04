@@ -4,7 +4,7 @@
   "wait_reg":10000,
   "timeout": 10000,
   "keep_alive_timeout": 600000,
-  "logmode": "2",
+  "logmode": "2,0,t,hexb",
   "logdir": "logs",
   "debug1": 0
 }

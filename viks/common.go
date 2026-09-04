@@ -247,26 +247,21 @@ func parseHexByte(s string) (byte, error) {
 }
 
 // Convert []byte to string "XX-XX...""
-??? func BufToHex(arr []byte) string {
+func BufToHex(arr []byte) string {
 	if len(arr) == 0 {
 		return ""
 	}
-
 	var builder strings.Builder
 	builder.Grow(len(arr) * 3) // выделяем память заранее: каждый байт -> "XX-" (3 символа)
 
 	for _, b := range arr {
-		if b < 0x10 {
-			builder.WriteByte('0')
-		}
-		builder.WriteString(fmt.Sprintf("%X-", b))
+		builder.WriteString(fmt.Sprintf("%02X-", b))
 	}
 
 	// убираем последний "-"
 	result := builder.String()
 	return result[:len(result)-1]
 }
-
 
 // читает длину, потом тело пакета с дедлайнами
 // не в VikingFrame т.к. нужен доступ к таймаутам conn
