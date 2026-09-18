@@ -73,9 +73,9 @@
 Viking Server v1.4
 Start time: 2026-09-16T20:48:26+03:00, runtime: 49s
 List: Всего клиентов 3
+0001: 'М-320:0001' Conn=[::1]:63806 RunTime=3s Spor:[ EE01 EE02 ]
 EE01: 'ПУEE01' Conn=[::1]:63807 RunTime=3s Spor:[ ]
 EE02: 'ПУEE02' Conn=[::1]:63808 RunTime=3s Spor:[ ]
-0001: 'М-320:0001' Conn=[::1]:63806 RunTime=3s Spor:[ EE01 EE02 ]
 -----------------------------------
 - "exit", Ctrl+C: выход
 ```

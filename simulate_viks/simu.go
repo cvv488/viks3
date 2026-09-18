@@ -11,10 +11,11 @@ import (
 )
 
 const (
+	FIRSTID_KP = 0x104
 	AMOUNT_KP  = 1
-	AMOUNT_PU  = 2
-	FIRSTID_KP = 1
-	FIRSTID_PU = 0xEE01
+
+	FIRSTID_PU = 0x01FF
+	AMOUNT_PU  = 1
 )
 
 var TotalScore int //счетчик подключений-отключений тестовый
@@ -22,41 +23,39 @@ var ioCount int
 
 func main() {
 	fmt.Println("----- START Simulate Viking -----")
-	// new clients
 	tcc := []TCPClient{}
 
-	// Загружаем конфигурацию
+	// Загрузить файл конфигурации и создать клиенты
 	config, err := LoadConfig("simuconfig.json")
 	if err != nil {
 		log.Fatal("Ошибка загрузки конфигурации:", err)
 	}
-	//клиенты из файла
-	// for _, cli := range config.Clients {
-	// client := NewTCPClient(cli, config)
+	for idx := range config.Clients {
+		client := NewTCPClient(idx, config)
+		tcc = append(tcc, *client)
+	}
+
+	//создание клиентов без файла конфигурации
+	// idx := 0
+	// config.Clients = []ClientConfig{} //очистить взятые из файла
+	// for n := range AMOUNT_KP {
+	// 	idkp := n + FIRSTID_KP
+	// 	sidkp := fmt.Sprintf("%04X", idkp)
+	// 	cli := ClientConfig{Id: idkp, Info: "М-320:" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
+	// 	config.Clients = append(config.Clients, cli)
+	// 	client := NewTCPClient(idx, config)
+	// 	idx++
 	// 	tcc = append(tcc, *client)
 	// }
-
-	//клиенты созданы без файла
-	config.Clients = []ClientConfig{} //очистить взятые из файла
-	idx := 0
-	for n := range AMOUNT_KP {
-		idkp := n + FIRSTID_KP
-		sidkp := fmt.Sprintf("%04X", idkp)
-		cli := ClientConfig{Id: idkp, Info: "М-320:" + sidkp, User: "User" + sidkp, Passw: "Passw" + sidkp}
-		config.Clients = append(config.Clients, cli)
-		client := NewTCPClient(idx, config)
-		idx++
-		tcc = append(tcc, *client)
-	}
-	for n := range AMOUNT_PU {
-		idpu := n + FIRSTID_PU
-		sidpu := fmt.Sprintf("%04X", idpu)
-		cli := ClientConfig{Id: idpu, Info: "ПУ" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
-		config.Clients = append(config.Clients, cli)
-		client := NewTCPClient(idx, config)
-		idx++
-		tcc = append(tcc, *client)
-	}
+	// for n := range AMOUNT_PU {
+	// 	idpu := n + FIRSTID_PU
+	// 	sidpu := fmt.Sprintf("%04X", idpu)
+	// 	cli := ClientConfig{Id: idpu, Info: "ПУ" + sidpu, User: "User" + sidpu, Passw: "Passw" + sidpu, Mode: "pu"}
+	// 	config.Clients = append(config.Clients, cli)
+	// 	client := NewTCPClient(idx, config)
+	// 	idx++
+	// 	tcc = append(tcc, *client)
+	// }
 
 	// Обработчик сигналов для корректного завершения
 	sigChan := make(chan os.Signal, 1)
@@ -73,7 +72,7 @@ func main() {
 	//run clients
 	for _, cli := range tcc {
 		go cli.Start()
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Millisecond * 200)
 	}
 
 	select {} // Бесконечное ожидание
@@ -144,11 +143,6 @@ func (c *TCPClient) Start() {
 	c.say(fmt.Sprintf("Authorized %v", TotalScore))
 
 	c.startHeartbeat()
-	// if c.conf.Mode == "pu" {
-	// 	c.startHeartbeatPU()
-	// } else {
-	// 	c.startHeartbeatKP()
-	// }
 
 	c.Close()
 	c.say("exit")
@@ -156,56 +150,59 @@ func (c *TCPClient) Start() {
 }
 
 func (c *TCPClient) startHeartbeat() {
-	c.say("Start " + c.conf.Mode)
+	mode := c.conf.Mode
+	c.say("Start mode: " + mode)
 	data := make([]byte, 10)
 	dataChan := make(chan string, 10)
 	go c.Receive(dataChan)
 
-	destKp := FIRSTID_KP
-	destPU := FIRSTID_PU
 	for {
 
-		//ПУ в цикле: запрашивает статус КП - отпрапвляет инф-пакет - ждет инф-ответ
+		//ПУ в цикле для множества КП: запрашивает статус КП - отпрапвляет инф-пакет - ждет инф-ответ
+		destKp := FIRSTID_KP
 		if c.conf.Mode == "pu" {
 			// fmt.Println("TotalScore=", TotalScore, "  dest=", dest)
 
-			//запрос статуса КП
-			stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
-			stf.AddOptionInt(OPT_PID, destKp) //PointID
-			stf.EndTx()
-			if err := c.Send(stf.txb); err != nil {
-				c.sayError("send req status", err)
-				return
-			}
-			c.say(fmt.Sprintf("<- req status of %04X ", destKp))
-			var staton bool
-			for {
-				msg := <-dataChan
-				if msg == "astat_on" {
-					staton = true
-					break
-				} else if msg == "astat_off" {
-					break
-				} else {
-					c.say(msg + "------------------ не astat!")
-				}
-			}
-
-			time.Sleep(time.Millisecond * 500)
-			if staton {
-				//отправка инф-пакета в КП и прием ответа
-				inf := NewVikingFrameInf(destKp, c.id, data)
-				if err := c.Send(inf.txb); err != nil {
-					c.sayError("send inf", err)
+			sendInfs := 1 //включить если нужно
+			if sendInfs == 1 {
+				//запрос статуса КП
+				stf := NewVikingFrame(TSLUG, 0, 0, MID_QSTAT)
+				stf.AddOptionInt(OPT_PID, destKp) //PointID
+				stf.EndTx()
+				if err := c.Send(stf.txb); err != nil {
+					c.sayError("send req status", err)
 					return
 				}
-				c.say(fmt.Sprintf("<- INF to %04X ", destKp))
+				c.say(fmt.Sprintf("<- req status of %04X ", destKp))
+				var staton bool
 				for {
 					msg := <-dataChan
-					if msg == "inf" {
+					if msg == "astat_on" {
+						staton = true
+						break
+					} else if msg == "astat_off" {
 						break
 					} else {
-						c.say(msg + "----------------- не inf!")
+						c.say(msg + "------------------ не astat!")
+					}
+				}
+
+				time.Sleep(time.Millisecond * 500)
+				if staton {
+					//отправка инф-пакета в КП и прием ответа
+					inf := NewVikingFrameInf(destKp, c.id, data)
+					if err := c.Send(inf.txb); err != nil {
+						c.sayError("send inf", err)
+						return
+					}
+					c.say(fmt.Sprintf("<- INF to %04X ", destKp))
+					for {
+						msg := <-dataChan
+						if msg == "inf" {
+							break
+						} else {
+							c.say(msg + "----------------- не inf!")
+						}
 					}
 				}
 			}
@@ -218,34 +215,45 @@ func (c *TCPClient) startHeartbeat() {
 			time.Sleep(time.Millisecond * 5000)
 
 		} else {
-			//КП в цикле: отпраляет пинг - ждет понг, получив инф-пакет - отвечает, отправляет спорадический пакет в ПУ
-			time.Sleep(time.Millisecond * 10000)
 
+			//КП в цикле для множества ПУ:
+			// - отпраляет пинг - ждет понг (if use on),
+			// - отправляет спорадический пакет в ПУ (if use on),
+			// - получив инф-пакет - отвечает,
+			destPU := FIRSTID_PU
+
+			sendPings := 1 //включить если нужно
 			//отправка пинга и прием понга
-			pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
-			pif.AddOptionInt(OPT_PID, c.id) //PointID
-			pif.EndTx()
-			if err := c.Send(pif.txb); err != nil {
-				c.sayError("send ping", err)
-				return
-			}
-			c.say("<- ping")
-			for {
-				msg := <-dataChan
-				// fmt.Println(msg, " TotalScore=", TotalScore)
-				if msg == "pong" {
-					break
+			if sendPings == 1 {
+				time.Sleep(time.Millisecond * 1000)
+				pif := NewVikingFrame(TSLUG, 0, 0, MID_PING)
+				pif.AddOptionInt(OPT_PID, c.id) //PointID
+				pif.EndTx()
+				if err := c.Send(pif.txb); err != nil {
+					c.sayError("send ping", err)
+					return
+				}
+				c.say("<- ping")
+				for {
+					msg := <-dataChan
+					// fmt.Println(msg, " TotalScore=", TotalScore)
+					if msg == "pong" {
+						break
+					}
 				}
 			}
 
+			sendSpor := 1 //включить если нужно
 			//отправка спорадического пакета от КП
-			time.Sleep(time.Millisecond * 1000)
-			inf := NewVikingFrameSpor(destPU, c.id, data)
-			if err := c.Send(inf.txb); err != nil {
-				c.sayError("send spor", err)
-				return
+			if sendSpor == 1 {
+				time.Sleep(time.Millisecond * 1000)
+				inf := NewVikingFrameSpor(destPU, c.id, data)
+				if err := c.Send(inf.txb); err != nil {
+					c.sayError("send spor", err)
+					return
+				}
+				c.say(fmt.Sprintf("<- spor to %04X ", destPU))
 			}
-			c.say(fmt.Sprintf("<- spor to %04X ", destPU))
 
 			destPU++
 			if destPU >= (FIRSTID_PU + AMOUNT_PU) {
@@ -257,6 +265,7 @@ func (c *TCPClient) startHeartbeat() {
 	}
 }
 
+// прием пакета
 func (c *TCPClient) Receive(dataChan chan string) {
 	pref := "receive"
 	for {
@@ -277,6 +286,8 @@ func (c *TCPClient) Receive(dataChan chan string) {
 		switch rxf.tid {
 		case TSLUG:
 			switch rxf.msgid {
+
+			//прием ответа со статусом
 			case MID_ASTAT:
 				var rxstat byte
 				opts := rxf.GetOptions()
@@ -285,11 +296,12 @@ func (c *TCPClient) Receive(dataChan chan string) {
 				} else {
 					rxstat = op.Body[0]
 				}
+				pid, _ := opts[OPT_PID]
 				if rxstat == 4 {
-					c.say("-> status on")
+					c.say(fmt.Sprintf("-> status %04X on", pid.Body))
 					dataChan <- "astat_on"
 				} else {
-					c.say("-> status off ===========================")
+					c.say(fmt.Sprintf("-> status %04X off ==============", pid.Body))
 					dataChan <- "astat_off"
 				}
 
@@ -300,6 +312,7 @@ func (c *TCPClient) Receive(dataChan chan string) {
 			default:
 				c.sayError(fmt.Sprintf("-> bad msgid=0x%02X", rxf.msgid), nil)
 			}
+
 		case TINFO:
 			if c.conf.Mode == "pu" {
 				c.say(fmt.Sprintf("-> INF from %04X ", rxf.srcadr))

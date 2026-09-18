@@ -4,17 +4,12 @@
     "ping_interval": 10,
     "timeout": 5000,
     "clients": [
-        {
-            "id": 1,
-            "info":"Info1",
-            "user":"user1",
-            "passw": "passw1"
-        },
-        {
-            "id": 2,
-            "info":"Info2",
-            "user":"user2",
-            "passw": "passw2"
-        }
+        // { "id": 1, "info":"Info1", "user":"user1", "passw": "passw1" },
+        // { "id": 2, "info":"Info2", "user":"user2", "passw": "passw2" }
+
+        { "id": "01FF", "info":"Orio", "username": "", "password": "", "mode": "pu" },
+        { "id": "0104", "info":"М320", "username": "", "password": "", "spor":["01FE", "01FF"] },
+        // { "id": "01FE", "username": "", "password": "" },
     ]
 }
+

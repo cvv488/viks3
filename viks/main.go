@@ -11,14 +11,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	APP_INFO = "Viking Server v1.4"
+	APP_INFO = "Viking Server v1.5"
 	PLINE    = "-----------------------------------"
 )
 
@@ -105,14 +105,23 @@ func (srv *ConnectionServer) Start() {
 				return
 			case "l", "list":
 				fmt.Println(APP_INFO)
-				fmt.Printf("Start time: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Since(startTime).Truncate(time.Second))
+				fmt.Printf("Start time: %v, Now: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Now().Format(time.RFC3339), time.Since(startTime).Truncate(time.Second))
 				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
-				srv.mutex.RLock() //srv.mutex.Lock()
-				for _, client := range srv.clients {
-					fmt.Printf("%s\n", client.Print())
-					// fmt.Printf("[%d]\t%s, Conn=%v RunTime=%v\n", id, client.Info, client.Conn.RemoteAddr(), time.Since(client.RunTime))
+
+				//список клиентов с сортировкой
+				srv.mutex.RLock()
+				clients := make([]*Client, 0, len(srv.clients))
+				for _, c := range srv.clients {
+					clients = append(clients, c)
 				}
 				srv.mutex.RUnlock()
+				sort.Slice(clients, func(i, j int) bool {
+					return clients[i].ids < clients[j].ids
+				})
+				for _, client := range clients {
+					fmt.Printf("%s\n", client.Print())
+				}
+
 				fmt.Println(PLINE)
 			}
 		}
@@ -524,23 +533,23 @@ func LoadConfig(fpath string) (*ServerConfig, error) {
 	return &config, err
 }
 
-func hextoint(hex string) (int, error) {
-	hexStr := strings.TrimPrefix(hex, "0x")
-	vv, err := strconv.ParseInt(hexStr, 16, 64)
-	return int(vv), err
-}
-
 // Загружает учётные данные из файла (ai)
 func loadAuthCredentials(filename string) ([]AuthCredential, error) {
-	file, err := os.Open(filename)
+	bb, err := ReadFileToBytesJson(filename)
 	if err != nil {
-		return nil, fmt.Errorf("не удалось открыть файл аутентификации: %v", err)
+		return nil, err
 	}
-	defer file.Close()
+
+	// file, err := os.Open(filename)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("не удалось открыть файл аутентификации: %v", err)
+	// }
+	// defer file.Close()
 
 	var credentials []AuthCredential
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&credentials)
+	err = json.Unmarshal(bb, &credentials)
+	// decoder := json.NewDecoder(file)
+	// err = decoder.Decode(&credentials)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка парсинга учётных данных: %v", err)
 	}
@@ -550,14 +559,14 @@ func loadAuthCredentials(filename string) ([]AuthCredential, error) {
 		if credentials[i].IdHex == "" {
 			return nil, fmt.Errorf("пустой IdHex[%d]", i)
 		}
-		vv, err := hextoint(credentials[i].IdHex)
+		vv, err := HexToInt(credentials[i].IdHex)
 		if err != nil {
 			return nil, fmt.Errorf("некорректный IdHex '%s': %v", credentials[i].IdHex, err)
 		}
 		credentials[i].Id = vv
 
 		for _, sporcpy := range credentials[i].SporHex {
-			ss, err := hextoint(sporcpy)
+			ss, err := HexToInt(sporcpy)
 			if err != nil {
 				return nil, err
 			}

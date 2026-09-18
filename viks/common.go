@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,6 +25,12 @@ func IHL(bb []byte) int {
 		return 0
 	}
 	return int(bb[0])<<8 + int(bb[1])
+}
+
+func HexToInt(hex string) (int, error) {
+	hexStr := strings.TrimPrefix(hex, "0x")
+	vv, err := strconv.ParseInt(hexStr, 16, 64)
+	return int(vv), err
 }
 
 // as json5: Поддерживаются однострочные и многострочные комментарии; Записи и списки могут иметь запятую после последнего элемента

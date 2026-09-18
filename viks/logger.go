@@ -46,7 +46,9 @@ func LogSetup(mode, logDir string) (restr string, consoleUse bool, err error) {
 		return
 	}
 	var w io.Writer
-	timeFormat := "2006-01-02 15:04:05"
+	const timeFormat = "2006-01-02 15:04:05.000"
+	zerolog.TimeFieldFormat = timeFormat // для JSON
+
 	if logDir == "" {
 		restr += "Вывод в консоль "
 		if len(modes) > 2 && modes[2] == "j" { //JSON
@@ -56,15 +58,15 @@ func LogSetup(mode, logDir string) (restr string, consoleUse bool, err error) {
 			// Консоль: цветной, читаемый формат
 			w = zerolog.ConsoleWriter{
 				Out:        os.Stdout,
-				TimeFormat: timeFormat,
-				NoColor:    false, // цвета включены
+				TimeFormat: timeFormat, // консоль
+				NoColor:    false,      // цвета включены
 				// LevelFormat:   "%s",                 // можно кастомизировать
 				// MessageFormat: "%s",
 			}
 		}
 	} else {
 		fname := "app.log"
-		restr += fmt.Sprintf("Вывод в файл '%s %s' ", logDir, fname)
+		restr += fmt.Sprintf("Вывод в файл: %s / %s ", logDir, fname)
 		if err = os.MkdirAll(logDir, 0o755); err != nil {
 			return
 		}

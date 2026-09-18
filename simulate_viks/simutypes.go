@@ -17,11 +17,12 @@ type Config struct {
 	Clients       []ClientConfig `json:"clients"`
 }
 type ClientConfig struct {
-	Id    int    `json:"id"`
+	Idhex string `json:"id"`
+	Id    int
 	Info  string `json:"info"`
 	User  string `json:"user"`
 	Passw string `json:"passw"`
-	Mode  string
+	Mode  string `json:"mode"`
 }
 
 // TCPClient — структура TCP-клиента
@@ -45,6 +46,16 @@ func LoadConfig(fpath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	//idhex -> id int
+	for i := range config.Clients {
+		vv, err := HexToInt(config.Clients[i].Idhex)
+		if err != nil {
+			return nil, fmt.Errorf("некорректный IdHex '%s': %v", config.Clients[i].Idhex, err)
+		}
+		config.Clients[i].Id = vv
+	}
+
 	return &config, err
 }
 
