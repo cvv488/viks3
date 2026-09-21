@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v1.5"
+	APP_INFO = "Viking Server v1.6"
 	PLINE    = "-----------------------------------"
 )
 
@@ -60,12 +60,12 @@ func main() {
 func (srv *ConnectionServer) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	srv.ctx = ctx
 	var wg sync.WaitGroup
 
-	wg.Add(1)
 	// CLI: читает строки через bufio.Reader / поодерживается история команд - стрелки вверх/вниз
+	// не в wg: при выходе по ctx.Done() горутина не помешает завершению, даже если висит на ReadString
 	go func() {
-		defer wg.Done()
 		fmt.Println("CLI started. Coommands:")
 		fmt.Println("  ?, help: вывод текущей информации")
 		fmt.Println("  l, list: вывод списка подключенных клиентов")
@@ -155,7 +155,11 @@ func (srv *ConnectionServer) Start() {
 	}()
 	say("Сервер запущен на порту " + srv.config.Port)
 
-	go srv.handleEvents()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.handleEvents()
+	}()
 
 	// listener.Accept() блокирующий поэтому в отдельной горутине
 	acceptDone := make(chan struct{})
@@ -301,6 +305,10 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		say("<~~ " + BufToHex(txf.txb))
 	}
 
+	var spor []int
+	if cre != nil { //при debug=1 cre=nil
+		spor = cre.Spor
+	}
 	client := &Client{
 		Id:        pointId,
 		ids:       pids,
@@ -309,22 +317,31 @@ func (srv *ConnectionServer) authenticateClient(conn net.Conn) {
 		Writer:    writer,
 		Reader:    reader,
 		KaTimeout: srv.config.KeepAliveTimeout,
-		spor:      cre.Spor, //при debug=1 cre=nil panic
+		spor:      spor,
 		RunTime:   time.Now(),
 	}
-	// if cre != nil{ //for debug=1
-	// 	client.spor = cre.Spor
-	// }
-
 	srv.register <- client
 	client.handleClient(srv)
+}
+
+// с мьютексом для Writer
+func (c *Client) Send(bb []byte, timeoutms int) error {
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
+	return Send(bb, c.Conn, c.Writer, timeoutms)
 }
 
 // Обрабатывает сообщения от конкретного клиента
 func (c *Client) handleClient(srv *ConnectionServer) {
 	pref := "handleClient: "
 	defer func() {
-		srv.unregister <- c
+		select {
+		case srv.unregister <- c:
+		case <-srv.ctx.Done():
+		default:
+			// если очередь переполнена — не блокируем горутину,
+			// handleEvents удалит клиента по факту закрытия Conn
+		}
 		c.say("exit")
 	}()
 	c.say("успешно аутентифицирован")
@@ -378,13 +395,18 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 				sf := NewVikingFrame(TSLUG, 0, 0, MID_ASTAT)
 				sf.AddOptionInt(OPT_PID, pointId)   //PointID
 				sf.AddOptionInt(OPT_NETID, pointId) //NetID
+
+				srv.mutex.RLock()
+				_, online := srv.clients[pointId]
+				srv.mutex.RUnlock()
 				astat := 4
-				if _, ok := srv.clients[pointId]; ok != true {
+				if !online {
 					astat = 2 //отключен
 				}
+
 				sf.AddOptionByte(OPT_STAT, byte(astat))
 				sf.EndTx()
-				err = Send(sf.txb, c.Conn, c.Writer, srv.config.Timeout)
+				err = c.Send(sf.txb, srv.config.Timeout)
 				if err != nil {
 					c.sayError("send astat", err)
 					return
@@ -396,7 +418,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 
 			case MID_PING: //Запрос “Keep alive”
 				c.say("-> ping")
-				err = Send(pif.txb, c.Conn, c.Writer, srv.config.Timeout)
+				err = c.Send(pif.txb, srv.config.Timeout)
 				if err != nil {
 					c.sayError("send pong", err)
 					return
@@ -411,7 +433,7 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 				//Note: также касается и известных команд протокола которые не поддерживаются версией, например подписки
 				sf := NewVikingFrame(TSLUG, 0, 0, MID_UNSU)
 				sf.EndTx()
-				err = Send(sf.txb, c.Conn, c.Writer, srv.config.Timeout)
+				err = c.Send(sf.txb, srv.config.Timeout)
 				if err != nil {
 					c.sayError("send unsupport", err)
 					return
@@ -446,7 +468,10 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 					continue //не повторять туда же
 				}
 				msg = fmt.Sprintf("spor list to %04X", ds)
-				if _, ok := srv.clients[ds]; ok == true { //приемник зарегистрирован
+				srv.mutex.RLock()
+				_, online := srv.clients[ds]
+				srv.mutex.RUnlock()
+				if online { //приемник зарегистрирован
 					vf.SetTxb(bb, ds) //сформировать пакет с новым dest_adr
 					rm := RouteMessage{Dest: ds, Data: vf.txb, LogMsg: msg}
 					srv.routecast <- rm
@@ -464,9 +489,11 @@ func (c *Client) handleClient(srv *ConnectionServer) {
 
 // Обрабатывает события регистрации/удаления клиентов и рассылку сообщений
 func (srv *ConnectionServer) handleEvents() {
-	var cli *Client
 	for {
 		select {
+		case <-srv.ctx.Done():
+			return
+
 		case client := <-srv.register:
 			srv.mutex.Lock()
 			srv.clients[client.Id] = client
@@ -483,25 +510,32 @@ func (srv *ConnectionServer) handleEvents() {
 			say(fmt.Sprintf("Unregistered %v, total %d", client.ids, len(srv.clients)))
 
 		case message := <-srv.routecast:
-			var ok bool
 			srv.mutex.RLock()
-			if cli, ok = srv.clients[message.Dest]; ok != true {
+			cli, ok := srv.clients[message.Dest]
+			srv.mutex.RUnlock()
+			if !ok {
 				sayW("Off dest: " + message.LogMsg)
 				//todo отправить резервным клиентам
+				continue
 			}
-			srv.mutex.RUnlock()
-			if ok {
-				err := Send(message.Data, cli.Conn, cli.Writer, srv.config.Timeout)
-				if err != nil {
-					cli.sayError("routecast:"+message.LogMsg, err)
-					srv.unregister <- cli // Если ошибка записи, помечаем клиента к удалению
-					return
+			err := cli.Send(message.Data, srv.config.Timeout)
+			if err != nil {
+				cli.sayError("routecast:"+message.LogMsg, err)
+				// Удаляем клиента напрямую, чтобы не блокировать handleEvents
+				// на записи в srv.unregister (единственный читатель — он сам).
+				srv.mutex.Lock()
+				if cur, exist := srv.clients[cli.Id]; exist && cur == cli {
+					delete(srv.clients, cli.Id)
 				}
-				if srv.logBytes {
-					cli.say("<== " + BufToHex(message.Data))
-				}
-				cli.say("<= " + message.LogMsg)
+				srv.mutex.Unlock()
+				cli.Conn.Close()
+				say(fmt.Sprintf("Unregistered2 %v, total %d", cli.ids, len(srv.clients)))
+				continue
 			}
+			if srv.logBytes {
+				cli.say("<== " + BufToHex(message.Data))
+			}
+			cli.say("<= " + message.LogMsg)
 		}
 	}
 }
@@ -529,6 +563,23 @@ func LoadConfig(fpath string) (*ServerConfig, error) {
 	err = json.Unmarshal(bb, &config)
 	if err != nil {
 		return nil, err
+	}
+
+	// значения по умолчанию для критичных полей
+	if config.Port == "" {
+		config.Port = "45000"
+	}
+	if config.MaxConnections <= 0 {
+		config.MaxConnections = 10_000
+	}
+	if config.WaitReg <= 0 {
+		config.WaitReg = 10_000
+	}
+	if config.Timeout <= 0 {
+		config.Timeout = 10_000
+	}
+	if config.KeepAliveTimeout <= 0 {
+		config.KeepAliveTimeout = 600_000 //10m
 	}
 	return &config, err
 }

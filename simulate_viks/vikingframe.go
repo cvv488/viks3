@@ -123,13 +123,12 @@ func NewVikingFrameRx(bb []byte) (*VikingFrame, error) {
 
 // формирует пакет для отправки с новым dest_adr
 func (vf *VikingFrame) SetTxb(bb []byte, dest int) {
-	rxb := bb[:len(bb)-2]    //без crc
-	rxb[3] = byte(dest >> 8) //as BHL(dest)
-	rxb[4] = byte(dest)
-	hi, lo := Crc(rxb)
-	vf.txb = rxb
-	vf.txb = append(vf.txb, lo)
-	vf.txb = append(vf.txb, hi)
+	nb := make([]byte, len(bb)-2) //без crc, копия т.к. bb мутабелен
+	copy(nb, bb[:len(bb)-2])
+	nb[3] = byte(dest >> 8)
+	nb[4] = byte(dest)
+	hi, lo := Crc(nb)
+	vf.txb = append(nb, lo, hi)
 }
 
 func (vf *VikingFrame) AddOption(code byte, vv string) {
@@ -161,11 +160,12 @@ func (vf *VikingFrame) GetOptions() map[int]Option {
 			break
 		}
 		lenOpt := int(vf.body[pos+1])
-		if pos+lenOpt+2 < len(vf.body) {
-			// opts = append(opts, Option{code: code, body: vf.Rxb[pos+2 : pos+len+2]})
-			opts[int(code)] = Option{Code: code, Body: vf.body[pos+2 : pos+lenOpt+2]}
+		end := pos + 2 + lenOpt
+		if end > len(vf.body) {
+			break
 		}
-		pos += lenOpt + 2
+		opts[int(code)] = Option{Code: code, Body: vf.body[pos+2 : end]}
+		pos = end
 	}
 	return opts
 }

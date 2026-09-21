@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -10,7 +11,7 @@ import (
 )
 
 type ConnectionServer struct {
-	// listener        net.Listener
+	ctx             context.Context
 	clients         map[int]*Client //подключенные клиенты
 	register        chan *Client
 	unregister      chan *Client
@@ -107,9 +108,9 @@ func NewConnectionServer(config *ServerConfig, authFile string) (*ConnectionServ
 
 	return &ConnectionServer{
 		clients:         make(map[int]*Client),
-		register:        make(chan *Client),
-		unregister:      make(chan *Client),
-		routecast:       make(chan RouteMessage),
+		register:        make(chan *Client, 64),
+		unregister:      make(chan *Client, 64),
+		routecast:       make(chan RouteMessage, 256),
 		config:          config,
 		credentials:     credentials,
 		connectionCount: 0,
