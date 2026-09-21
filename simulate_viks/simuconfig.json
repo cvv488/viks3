@@ -9,6 +9,7 @@
 
         { "id": "01FF", "info":"Orio", "username": "", "password": "", "mode": "pu" },
         { "id": "0104", "info":"М320", "username": "", "password": "", "spor":["01FE", "01FF"] },
+        // { "id": "0104", "info":"DUBL", "username": "", "password": "", "spor":["01FE", "01FF"] },
         // { "id": "01FE", "username": "", "password": "" },
     ]
 }

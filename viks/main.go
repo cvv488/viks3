@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -18,7 +19,7 @@ import (
 )
 
 const (
-	APP_INFO = "Viking Server v1.6"
+	APP_INFO = "Viking Server v1.7"
 	PLINE    = "-----------------------------------"
 )
 
@@ -106,7 +107,7 @@ func (srv *ConnectionServer) Start() {
 			case "l", "list":
 				fmt.Println(APP_INFO)
 				fmt.Printf("Start time: %v, Now: %v, runtime: %v\n", startTime.Format(time.RFC3339), time.Now().Format(time.RFC3339), time.Since(startTime).Truncate(time.Second))
-				fmt.Printf("List: Всего клиентов %d\n", len(srv.clients))
+				fmt.Printf("List: Клиентов: %d Соединений: %d \n", len(srv.clients), srv.connectionCount)
 
 				//список клиентов с сортировкой
 				srv.mutex.RLock()
@@ -122,6 +123,16 @@ func (srv *ConnectionServer) Start() {
 					fmt.Printf("%s\n", client.Print())
 				}
 
+				fmt.Println(PLINE)
+
+			case "r": //runtime info
+				fmt.Println(PLINE)
+				srv.mutex.RLock()
+				n := len(srv.clients)
+				srv.mutex.RUnlock()
+				say(fmt.Sprintf("*************** [stat] goroutines=%d clients=%d conns=%d", runtime.NumGoroutine(), n, srv.connectionCount))
+				// [stat] goroutines=9 clients=2 conns=3 - лишняя горутина от дубля без защиты в v1.6
+				// [stat] goroutines=8 clients=2 conns=2 - в v1.7 защита от дубля сработала - все ок
 				fmt.Println(PLINE)
 			}
 		}
@@ -496,17 +507,23 @@ func (srv *ConnectionServer) handleEvents() {
 
 		case client := <-srv.register:
 			srv.mutex.Lock()
+			//удалить старый дубликат если есть
+			if old, exists := srv.clients[client.Id]; exists && old != client {
+				old.Conn.Close() // закроем старый сокет — его ReadPac вернёт ошибку, handleClient завершится
+				sayW(fmt.Sprintf("%v: *** Вытеснен новым подключением", old.ids))
+			}
 			srv.clients[client.Id] = client
 			srv.mutex.Unlock()
 			say(fmt.Sprintf("Registered %v, total %d", client.ids, len(srv.clients)))
 
 		case client := <-srv.unregister:
 			srv.mutex.Lock()
-			if _, ok := srv.clients[client.Id]; ok {
+			if cur, ok := srv.clients[client.Id]; ok && cur == client {
+				//тут еще сравнивается указатель - удалит только себя, но новый клиент с тем же Id (дубликат) не удалится
 				delete(srv.clients, client.Id)
-				client.Conn.Close()
 			}
 			srv.mutex.Unlock()
+			client.Conn.Close()
 			say(fmt.Sprintf("Unregistered %v, total %d", client.ids, len(srv.clients)))
 
 		case message := <-srv.routecast:

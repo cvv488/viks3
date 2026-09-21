@@ -75,6 +75,12 @@ func main() {
 		time.Sleep(time.Millisecond * 200)
 	}
 
+	//запустить дубликат
+	// time.Sleep(time.Second * 5)
+	// ccd := ClientConfig{Id: 0x104, Info: "DDD", User: "", Passw: ""}
+	// idxd := len(config.Clients) + 1
+	// client := NewTCPClient(idxd, ccd)
+
 	select {} // Бесконечное ожидание
 }
 
