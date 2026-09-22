@@ -136,32 +136,10 @@ CLI started. Coommands:
     go env -w GO111MODULE="on"
     go mod init viks3
     go mod tidy
- 
-# Сборка в Windows powershell или Терминал vscode
-cd viks
-## для windows
-$env:GOOS="windows"; $env:GOARCH="amd64"; go build -o ./exe/viks.exe
-## для linux
-$env:GOOS="linux"; $env:GOARCH="amd64"; go build -o ./exe/viks
-
-# Сборка в Windows cmd
-set GOOS=windows
-set GOARCH=amd64
-go build -o
-# or
-set GOOS=windows&&set GOARCH=amd64&&go build
-
-
-# Сборка в Linux: ----------
-# для Linux amd64 (часто для контейнеров/Kubernetes)
-GOOS=linux GOARCH=amd64 go build -o viks-linux-amd64 ./cmd/server
-
-# для Windows amd64
-GOOS=windows GOARCH=amd64 go build -o viks.exe ./cmd/server
-
-# для macOS ARM64
-GOOS=darwin GOARCH=arm64 go build -o viks-mac ./cmd/server
 ```
+Для сборки в Windows запустить в cmd: build.bat
+
+
 
 # 6. TODO
 1. подключенный ранее и тот же только что подключившийся должны быть отключены оба принудительно
